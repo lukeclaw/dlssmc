@@ -1,6 +1,7 @@
 package com.jhp.client.mixin;
 
 import com.jhp.client.dlss.DlssJitter;
+import com.jhp.client.dlss.DlssDebug;
 import com.jhp.client.dlss.DlssMotion;
 import com.jhp.client.dlss.DlssResolution;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -67,6 +68,9 @@ public abstract class GameRendererMixin {
             TextureTarget level = DlssResolution.levelTarget();
             // Upscale the low-res world into the native target (NEAREST; DLSS replaces this in Phase 2).
             level.blitAndBlendToTexture(real.getColorTextureView(), real.getDepthTextureView());
+            if (DlssDebug.showDepth) {
+                DlssDebug.blitDepth(level, real); // grayscale depth over the color image (debug)
+            }
             this.mainRenderTarget = real;
             this.dlssmc$savedTarget = null;
         }
