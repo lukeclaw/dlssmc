@@ -21,12 +21,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
 
-    @Inject(method = "renderLevel", at = @At("HEAD"), require = 0)
+    @Inject(method = "renderLevel", at = @At("HEAD"), require = 1) // S2 confirmed
     private void dlssmc$beginJitter(CallbackInfo ci) {
         DlssJitter.beginLevelFrame();
     }
 
-    @Inject(method = "renderLevel", at = @At("RETURN"), require = 0)
+    @Inject(method = "renderLevel", at = @At("RETURN"), require = 1) // S2 confirmed
     private void dlssmc$endJitter(CallbackInfo ci) {
         DlssJitter.endLevelFrame();
     }

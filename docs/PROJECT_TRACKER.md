@@ -24,10 +24,13 @@
   getMatrix(Matrix4f)` + `width()/height()`. Mixins updated to match; queue capture added.
 - **S1 CONFIRMED** (Gate C): device+queue captured on NVIDIA 596.49 / Vulkan 1.4;
   `VulkanDeviceMixin` promoted to `require=1`.
-- **Next up:** rebuild + run again — new one-shot logs will confirm whether the jitter
-  mixins fire (`[DLSSmc] jitter scope active` + `[DLSSmc] jitter applied ... dims=...`)
-  → verifies **S2** numerically. If both appear, flip `GameRendererMixin`/`ProjectionMixin`
-  to `require=1`; if not, the missing log says which one to fix.
+- **S2 CONFIRMED** (Gate C): both jitter mixins fire; offsets/NDC exact; all 3 mixins
+  now `require=1`. **Milestone M1 complete.**
+- **Next up (fork):** either **P1-5** resolution decoupling (render 3D to a low-res
+  offscreen target, composite UI at native) or begin **P2-1/P2-2** DLSS wiring (needs
+  the Streamline SDK downloaded first). See chat for the decision.
+- Note: jitter alone (no resolver yet) causes mild sub-pixel shimmer — expected until
+  DLSS resolves it; can be gated behind a flag if it bothers dev testing.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -37,7 +40,7 @@
 ## Milestones
 
 - [x] **M0 — Environment & recon** — template scaffolded, snapshot jar resolved, risks spiked.
-- [~] **M1 — Handles + jitter** — handles captured at runtime ✅ (S1); jitter application pending log confirmation (S2).
+- [x] **M1 — Handles + jitter** — device+queue captured (S1) and jitter applied with correct Halton offsets (S2), both runtime-verified 2026-07-10.
 - [ ] **M2 — Resolution decoupling** — internal 3D res < output; UI composited at native res.
 - [ ] **M3 — Motion vectors** — correct per-pixel MVs for chunks + entities (debug-viz verified).
 - [ ] **M4 — DLSS on** — Streamline manual-hooked; DLSS SR upscaling live.
@@ -62,7 +65,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-1 Vulkan handle-capture (`VulkanDeviceMixin` + `DlssRenderState`): **runtime-confirmed (S1)** — device=0x2197..880, graphicsQueue=0x2197..cd0, family=0 on NVIDIA 596.49 / Vulkan 1.4. Mixin now `require=1`.
 - [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
-- [~] P1-4 Jitter injection **scaffolded**: `DlssJitter` (Halton(2,3), 16-phase, pixel+NDC offset, reset flag) + `GameRendererMixin` scopes jitter to `renderLevel` + `ProjectionMixin` jitters `Projection.getMatrix()` return. Confirm descriptors + verify numerically (**S2**); feed real render res after P1-5.
+- [x] P1-4 Jitter injection **runtime-verified (S2)**: at phase=1, offsetPx=(-0.25, 0.1667) → ndc=(-5.85e-4, 6.94e-4) at 854x480; Halton math exact. All 3 mixins now `require=1`. (Applied on the window-res projection; will use internal render res automatically after P1-5.)
 - [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
 - [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
@@ -81,7 +84,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 ### Verification (ongoing)
 - [x] V-1 **BUILD SUCCESSFUL** on the dev machine (JDK 25 toolchain) — all mixins + DlssJitter/DlssRenderState compile against 26.3-snapshot-3 (2026-07-10).
 - [x] V-2 Runtime handle-capture confirmed — non-zero device+queue handles logged (2026-07-10).
-- [ ] V-3 Numeric jitter check.
+- [x] V-3 Numeric jitter check — logged offsets match Halton(2,3) and NDC=2·offset/dim exactly (2026-07-10).
 - [ ] V-4 Motion-vector debug visualization.
 - [ ] V-5 DLSS active + internal-res reduction confirmed.
 
@@ -101,8 +104,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 
 Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 
-> ✅ Descriptors **confirmed via `javap`** (Gate A, 2026-07-10). `VulkanQueue` is a
-> record. Runtime application still pending Gate C before flipping `require = 0` → `1`.
+> ✅ Descriptors confirmed via `javap` **and all three mixins runtime-verified** (Gate C,
+> 2026-07-10) — device capture (S1) + jitter (S2). All now `require = 1`.
 
 ---
 

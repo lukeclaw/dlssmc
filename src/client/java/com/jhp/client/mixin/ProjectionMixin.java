@@ -27,7 +27,7 @@ public abstract class ProjectionMixin {
 
     @Shadow public abstract float height();
 
-    @Inject(method = "getMatrix", at = @At("RETURN"), require = 0)
+    @Inject(method = "getMatrix", at = @At("RETURN"), require = 1) // S2 confirmed
     private void dlssmc$jitterProjection(CallbackInfoReturnable<Matrix4f> cir) {
         if (!DlssJitter.isActive()) {
             return;
