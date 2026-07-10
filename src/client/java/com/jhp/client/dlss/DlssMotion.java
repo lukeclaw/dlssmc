@@ -1,0 +1,84 @@
+package com.jhp.client.dlss;
+
+import com.jhp.DLSSmc;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
+
+/**
+ * Motion-vector support (Phase 1, tracker task P1-7).
+ *
+ * <p>This first slice captures the per-frame data a camera-reprojection motion-vector
+ * pass needs — the <b>unjittered</b> view-projection and the world camera position, for
+ * both the current and previous frame — and validates the reprojection MATH on the CPU
+ * (logged) before it is committed to a GPU shader. Minecraft renders camera-relative, so
+ * clip = proj · viewRot · (worldPos − cameraPos); reprojection must therefore carry the
+ * camera-position delta between frames.</p>
+ *
+ * <p>Next iteration: feed {@link #currentViewProj()}/{@link #previousViewProj()} and the
+ * camera delta into a full-screen fragment shader that reads depth, reconstructs the
+ * world point, reprojects with the previous matrices, and writes per-pixel velocity into
+ * an RG16F target.</p>
+ */
+public final class DlssMotion {
+    private DlssMotion() {}
+
+    private static final Matrix4f curViewProj = new Matrix4f();
+    private static final Matrix4f prevViewProj = new Matrix4f();
+    private static double curCamX, curCamY, curCamZ;
+    private static double prevCamX, prevCamY, prevCamZ;
+    private static boolean primed = false;
+    private static long frame = 0;
+
+    /** Capture this frame's unjittered view-proj + camera position; shift the previous. */
+    public static void capture(CameraRenderState camera) {
+        prevViewProj.set(curViewProj);
+        prevCamX = curCamX; prevCamY = curCamY; prevCamZ = curCamZ;
+
+        // clip = projection * viewRotation, applied to (worldPos - cameraPos).
+        curViewProj.set(camera.projectionMatrix).mul(camera.viewRotationMatrix);
+        curCamX = camera.pos.x; curCamY = camera.pos.y; curCamZ = camera.pos.z;
+
+        if (!primed) {
+            prevViewProj.set(curViewProj);
+            prevCamX = curCamX; prevCamY = curCamY; prevCamZ = curCamZ;
+            primed = true;
+        }
+        frame++;
+        debugSanityCheck();
+    }
+
+    public static Matrix4f currentViewProj() { return curViewProj; }
+    public static Matrix4f previousViewProj() { return prevViewProj; }
+    public static float camDeltaX() { return (float) (curCamX - prevCamX); }
+    public static float camDeltaY() { return (float) (curCamY - prevCamY); }
+    public static float camDeltaZ() { return (float) (curCamZ - prevCamZ); }
+
+    /**
+     * CPU validation of the exact reprojection the shader will do: for the screen-centre
+     * pixel at a mid depth, reconstruct the world point from the current view-proj and
+     * reproject it with the previous frame's matrices. Logs the resulting motion vector
+     * in NDC when the camera actually moved, throttled so it doesn't spam.
+     */
+    private static void debugSanityCheck() {
+        float dx = camDeltaX(), dy = camDeltaY(), dz = camDeltaZ();
+        boolean moved = (dx * dx + dy * dy + dz * dz) > 1.0e-8f;
+        if (!moved || (frame % 30) != 0) {
+            return;
+        }
+        // Centre pixel, NDC (0,0), mid depth (Vulkan clip z in [0,1]).
+        Vector4f clip = new Vector4f(0f, 0f, 0.5f, 1f);
+        Vector4f rel = new Matrix4f(curViewProj).invert().transform(clip);
+        if (rel.w == 0f) return;
+        rel.div(rel.w); // camera-relative world point (relative to CURRENT camera)
+
+        // Re-express relative to the PREVIOUS camera, then project with previous matrices.
+        Vector4f prevRel = new Vector4f(rel.x + dx, rel.y + dy, rel.z + dz, 1f);
+        Vector4f prevClip = prevViewProj.transform(prevRel);
+        if (prevClip.w == 0f) return;
+        float mvx = prevClip.x / prevClip.w - 0f; // current centre NDC.x is 0
+        float mvy = prevClip.y / prevClip.w - 0f; // current centre NDC.y is 0
+        DLSSmc.LOGGER.info("[DLSSmc] MV sanity (centre px): camDelta=({}, {}, {}) -> mvNDC=({}, {})",
+                dx, dy, dz, mvx, mvy);
+    }
+}

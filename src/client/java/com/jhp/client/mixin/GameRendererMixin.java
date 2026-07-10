@@ -1,10 +1,12 @@
 package com.jhp.client.mixin;
 
 import com.jhp.client.dlss.DlssJitter;
+import com.jhp.client.dlss.DlssMotion;
 import com.jhp.client.dlss.DlssResolution;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.state.GameRenderState;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -42,9 +44,13 @@ public abstract class GameRendererMixin {
     @Unique
     private RenderTarget dlssmc$savedTarget;
 
+    @Shadow @Final
+    private GameRenderState gameRenderState;
+
     @Inject(method = "renderLevel", at = @At("HEAD"), require = 1)
     private void dlssmc$onRenderLevelHead(CallbackInfo ci) {
         DlssJitter.beginLevelFrame();
+        DlssMotion.capture(this.gameRenderState.levelRenderState.cameraRenderState);
         if (DlssResolution.enabled()) {
             RenderTarget real = this.mainRenderTarget;
             TextureTarget level = DlssResolution.ensureLevelTarget(real.width, real.height);

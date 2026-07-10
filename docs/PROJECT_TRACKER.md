@@ -29,9 +29,11 @@
 - **M2 DONE (S3 confirmed):** half-res world upscales to native, HUD crisp. P1-6 also
   satisfied (HUD native by construction). We now have all the *rendering* pieces DLSS
   needs except motion vectors.
-- **Next up (fork):** **P1-7 motion vectors** (the last big DLSS input; camera/global MVs
-  first, then entities) OR begin **P2 DLSS wiring** (needs Streamline SDK downloaded).
-  Optional quick win: a keybind to cycle render scale live for tuning.
+- **P1-7 in progress — motion vectors.** Math slice landed: `DlssMotion` captures
+  unjittered view-proj + camera-pos history and CPU-logs a reprojected centre MV. Verify
+  the log next run (move the camera). Then build the GPU velocity pass (RG16F target +
+  `core/screenquad` + custom MV fragment shader). Expect several iterate-look cycles —
+  this is the human-eyes-on-GPU part.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -69,7 +71,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
 - [x] P1-5 **Resolution decoupling VISUALLY CONFIRMED (S3)**: at scale=0.5 the 3D world renders blocky/half-res and upscales to native; HUD crisp. Field-swap of `mainRenderTarget` redirects the whole world render graph as predicted.
 - [x] P1-6 HUD/UI at native res — satisfied by the P1-5 design: world upscales into the native target at `renderLevel` RETURN, then vanilla GUI renders into that native target. Confirmed crisp HUD over half-res world.
-- [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
+- [~] P1-7 Motion vectors — **math slice**: `DlssMotion` captures unjittered current/prev view-proj (= proj·viewRot) + camera world pos from `CameraRenderState`; CPU sanity-check logs reprojected centre-pixel MV when the camera moves. Validates the camera-relative reprojection before the GPU pass. Next: RG16F velocity target + full-screen MV shader (`core/screenquad` + custom `.fsh`, depth sampler + matrices UBO via `BindGroupLayout`).
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).
 - [ ] P1-9 Motion vectors: chunks/terrain (mostly camera-only) + particles/water passes as needed.
 - [ ] P1-10 Depth handling: confirm depth format/space; linearize if DLSS needs it.
