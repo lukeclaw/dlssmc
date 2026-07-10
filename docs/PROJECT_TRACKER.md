@@ -26,11 +26,12 @@
   `VulkanDeviceMixin` promoted to `require=1`.
 - **S2 CONFIRMED** (Gate C): both jitter mixins fire; offsets/NDC exact; all 3 mixins
   now `require=1`. **Milestone M1 complete.**
-- **P1-5 implemented (scale=0.5), pending VISUAL verify (S3):** rebuild + run + load
-  world. Expect log `[DLSSmc] resolution decoupled: native WxH -> internal (W/2)x(H/2)`,
-  the **3D world visibly blocky/pixelated** while the **HUD (crosshair/hotbar/text) stays
-  crisp**. Send a screenshot. If black screen/crash, capture the log — likely the
-  `blitAndBlendToTexture` pipeline or the field-swap.
+- **M2 DONE (S3 confirmed):** half-res world upscales to native, HUD crisp. P1-6 also
+  satisfied (HUD native by construction). We now have all the *rendering* pieces DLSS
+  needs except motion vectors.
+- **Next up (fork):** **P1-7 motion vectors** (the last big DLSS input; camera/global MVs
+  first, then entities) OR begin **P2 DLSS wiring** (needs Streamline SDK downloaded).
+  Optional quick win: a keybind to cycle render scale live for tuning.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -41,7 +42,7 @@
 
 - [x] **M0 — Environment & recon** — template scaffolded, snapshot jar resolved, risks spiked.
 - [x] **M1 — Handles + jitter** — device+queue captured (S1) and jitter applied with correct Halton offsets (S2), both runtime-verified 2026-07-10.
-- [~] **M2 — Resolution decoupling** — implemented (world→low-res target→upscale, HUD native); pending visual confirmation (S3).
+- [x] **M2 — Resolution decoupling** — VISUALLY CONFIRMED (S3): half-res world upscaled to native, HUD crisp (2026-07-10).
 - [ ] **M3 — Motion vectors** — correct per-pixel MVs for chunks + entities (debug-viz verified).
 - [ ] **M4 — DLSS on** — Streamline manual-hooked; DLSS SR upscaling live.
 - [ ] **M5 — Quality bar** — no gross ghosting; reset flag correct; prototype demo.
@@ -66,8 +67,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
 - [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
-- [~] P1-5 **Implemented**: `DlssResolution` owns a low-res `TextureTarget` (RGBA8/D32F); `GameRendererMixin` swaps `mainRenderTarget` for `renderLevel` (redirects the whole world render graph via `gameRenderer.mainRenderTarget()`), then `blitAndBlendToTexture` upscales into the native target before the HUD. scale=0.5 default. Pending visual verify (**S3**).
-- [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
+- [x] P1-5 **Resolution decoupling VISUALLY CONFIRMED (S3)**: at scale=0.5 the 3D world renders blocky/half-res and upscales to native; HUD crisp. Field-swap of `mainRenderTarget` redirects the whole world render graph as predicted.
+- [x] P1-6 HUD/UI at native res — satisfied by the P1-5 design: world upscales into the native target at `renderLevel` RETURN, then vanilla GUI renders into that native target. Confirmed crisp HUD over half-res world.
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).
 - [ ] P1-9 Motion vectors: chunks/terrain (mostly camera-only) + particles/water passes as needed.
