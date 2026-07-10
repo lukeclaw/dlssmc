@@ -29,11 +29,13 @@
 - **M2 DONE (S3 confirmed):** half-res world upscales to native, HUD crisp. P1-6 also
   satisfied (HUD native by construction). We now have all the *rendering* pieces DLSS
   needs except motion vectors.
-- **P1-7 in progress — motion vectors.** Math slice landed: `DlssMotion` captures
-  unjittered view-proj + camera-pos history and CPU-logs a reprojected centre MV. Verify
-  the log next run (move the camera). Then build the GPU velocity pass (RG16F target +
-  `core/screenquad` + custom MV fragment shader). Expect several iterate-look cycles —
-  this is the human-eyes-on-GPU part.
+- **P1-7 — motion vectors: hit the expected hard wall.** Reprojection math CPU-verified;
+  custom-shader pipeline plumbing visually confirmed (UV gradient). BUT renderpearl won't
+  let a shader sample the raw depth buffer (Mojang only uses it as a depth attachment).
+  So MVs need approach (A) depth-resolve-to-color pass, or (B) MRT velocity during the
+  geometry pass. Debug viz turned OFF; game renders normally (M2 state). **Awaiting a
+  direction call** (see chat): MRT MVs, or light up DLSS first with zero/interim MVs, or
+  pause the GPU grind here with the foundation proven.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -71,10 +73,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
 - [x] P1-5 **Resolution decoupling VISUALLY CONFIRMED (S3)**: at scale=0.5 the 3D world renders blocky/half-res and upscales to native; HUD crisp. Field-swap of `mainRenderTarget` redirects the whole world render graph as predicted.
 - [x] P1-6 HUD/UI at native res — satisfied by the P1-5 design: world upscales into the native target at `renderLevel` RETURN, then vanilla GUI renders into that native target. Confirmed crisp HUD over half-res world.
-- [~] P1-7 Motion vectors — **math slice**: `DlssMotion` captures unjittered current/prev view-proj (= proj·viewRot) + camera world pos from `CameraRenderState`; CPU sanity-check logs reprojected centre-pixel MV when the camera moves. Validates the camera-relative reprojection before the GPU pass. Next: RG16F velocity target + full-screen MV shader (`core/screenquad` + custom `.fsh`, depth sampler + matrices UBO via `BindGroupLayout`).
+- [~] P1-7 Motion vectors — reprojection math CPU-verified; custom-shader **pipeline plumbing confirmed** (UV gradient). **BLOCKER found:** renderpearl does not expose the depth buffer for direct `sampler2D` sampling — Mojang only uses `depthTextureView` as a *depth attachment*; the sole sampled "depth" is a *color* depth-bounds target. A screen-space camera-reprojection MV pass needs per-pixel depth, so it requires either:
+  - (A) a **depth-resolve pass** that writes scene depth into a color/R32F target (then sample that), or
+  - (B) **MRT velocity output** written during the geometry pass (chunk/entity pipelines emit velocity to a 2nd color attachment) — the DLSS-canonical way, but invasive across many pipelines.
+  This is the biggest, most iteration-heavy Phase-1 item (as the brief predicted). Decision pending.
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).
 - [ ] P1-9 Motion vectors: chunks/terrain (mostly camera-only) + particles/water passes as needed.
-- [ ] P1-10 Depth handling: confirm depth format/space; linearize if DLSS needs it.
+- [~] P1-10 Depth: level target uses `D32_FLOAT`. Raw depth texture is **not sampleable** as `sampler2D` in renderpearl (returns 0). Reverse-Z/space still TBD once depth is obtained via (A) or (B) above.
 
 ### Phase 2 — DLSS integration
 - [ ] P2-1 Inject DLSS-required VK **instance/device extensions + features** into `VulkanBackend`/`VulkanInstance`/`FeatureSet` before `vkCreateDevice`.
@@ -88,7 +93,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] V-1 **BUILD SUCCESSFUL** on the dev machine (JDK 25 toolchain) — all mixins + DlssJitter/DlssRenderState compile against 26.3-snapshot-3 (2026-07-10).
 - [x] V-2 Runtime handle-capture confirmed — non-zero device+queue handles logged (2026-07-10).
 - [x] V-3 Numeric jitter check — logged offsets match Halton(2,3) and NDC=2·offset/dim exactly (2026-07-10).
-- [ ] V-4 Motion-vector debug visualization.
+- [~] V-4 Custom-shader GPU plumbing **CONFIRMED** (UV gradient renders via a dlssmc pipeline+shader). Depth half was black → raw depth not directly sampleable (see P1-7 finding).
 - [ ] V-5 DLSS active + internal-res reduction confirmed.
 
 ---
