@@ -4,9 +4,13 @@ Claude works in a sandbox with **no JDK 25, no GPU, no network**, so it cannot c
 run, or see the game. You are the hands. Each iteration has up to four gates. Run the
 ones Claude asks for, then paste the marked output back into chat.
 
-> Windows: use **Git Bash** (ships with Git for Windows) so the commands below work
-> as-is. In PowerShell, replace `./gradlew` with `.\gradlew.bat`. Run everything from
-> the repo root: `D:\Projects\dlssmc`.
+> **Shell:** commands are given for **PowerShell** (the Windows default). Run everything
+> from the repo root: `D:\Projects\dlssmc`. Git Bash works too — swap `.\gradlew.bat`
+> for `./gradlew` and use the bash `JAR=$(find ...)` form.
+>
+> **Tip:** any command below that produces output for Claude can be redirected to a file
+> in `docs\` (e.g. `... *> docs\javap_dump.txt`). Because this folder is mounted, Claude
+> can read that file directly — you just say "done" instead of pasting.
 
 ---
 
@@ -15,16 +19,21 @@ ones Claude asks for, then paste the marked output back into chat.
 This replaces Claude's constant-pool guesses with the real signatures. Needs JDK 25's
 `javap` (you have it now).
 
-```bash
-# find the deobfuscated Minecraft jar Loom already downloaded
-JAR=$(find .gradle/loom-cache -name 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | head -1)
-echo "$JAR"
+```powershell
+$JAR = (Get-ChildItem -Recurse .gradle\loom-cache -Filter 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | Select-Object -First 1).FullName
+$JAR   # should print a path, not blank
 
-javap -p -cp "$JAR" com.mojang.renderpearl.backend.vulkan.VulkanDevice
-javap -p -cp "$JAR" com.mojang.renderpearl.backend.vulkan.VulkanQueue
-javap -p -cp "$JAR" net.minecraft.client.renderer.GameRenderer
-javap -p -cp "$JAR" net.minecraft.client.renderer.Projection
+& {
+  javap -p -cp "$JAR" com.mojang.renderpearl.backend.vulkan.VulkanDevice
+  javap -p -cp "$JAR" com.mojang.renderpearl.backend.vulkan.VulkanQueue
+  javap -p -cp "$JAR" net.minecraft.client.renderer.GameRenderer
+  javap -p -cp "$JAR" net.minecraft.client.renderer.Projection
+} *> docs\javap_dump.txt
 ```
+
+Then say **"done"** — Claude reads `docs\javap_dump.txt` from the folder. (Git Bash: use
+`JAR=$(find .gradle/loom-cache -name 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | head -1)`
+and run the four `javap` lines without the `& { }` wrapper.)
 
 **Paste back:** the full output of all four. From it Claude will pin:
 - `VulkanDevice`: exact `<init>` signature + `vkDevice` field + queue getters (for `VulkanDeviceMixin`).
