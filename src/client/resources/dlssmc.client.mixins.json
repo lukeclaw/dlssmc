@@ -3,7 +3,9 @@
 	"package": "com.jhp.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"ExampleClientMixin"
+		"VulkanDeviceMixin",
+		"GameRendererMixin",
+		"ProjectionMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -13,11 +13,13 @@
 ## ▶ RESUME HERE (where we left off)
 
 - **Done:** Risk spikes 1/1b/2/3 complete (see findings). PRD + tracker written. Git
-  baseline established. Phase-1 Vulkan handle-capture Mixin scaffold added and
-  compiling.
-- **Next up:** Task **P1-2** — confirm exact `@Inject`/`@Accessor` descriptors against
-  Loom `genSources`, then verify `DlssRenderState` actually captures a non-null
-  `VkDevice` at runtime with the Vulkan backend enabled (success criterion **S1**).
+  baseline established. Phase-1 Vulkan handle-capture scaffold (`VulkanDeviceMixin` +
+  `DlssRenderState`) **and** jitter scaffold (`DlssJitter` + `GameRendererMixin` +
+  `ProjectionMixin`) added; all statically verified.
+- **Next up:** on the JDK-25 dev machine, run `./gradlew genSources` then `./gradlew
+  build`; confirm the `@Inject`/`@Accessor`/`getMatrix`/`renderLevel` descriptors
+  in-IDE; verify non-null `VkDevice` at runtime (**S1**) and numeric jitter offset
+  (**S2**).
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -52,7 +54,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-1 Vulkan handle-capture Mixin scaffold (`VulkanDeviceMixin` + `DlssRenderState` holder). *(compiles; runtime unverified)*
 - [ ] P1-2 Confirm `@Inject`/`@Accessor` descriptors vs `genSources`; verify non-null `VkDevice`/`VkQueue` at runtime (**S1**).
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
-- [ ] P1-4 Jitter injection into level projection matrix (`GameRenderer`/`ProjectionMatrixBuffer`); Halton(2,3) 16-phase; verify numerically (**S2**).
+- [~] P1-4 Jitter injection **scaffolded**: `DlssJitter` (Halton(2,3), 16-phase, pixel+NDC offset, reset flag) + `GameRendererMixin` scopes jitter to `renderLevel` + `ProjectionMixin` jitters `Projection.getMatrix()` return. Confirm descriptors + verify numerically (**S2**); feed real render res after P1-5.
 - [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
 - [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
@@ -69,7 +71,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [ ] P2-6 **[!] Human:** read NVIDIA Streamline SDK EULA in the release zip; resolve redistribution before shipping (**Risk 3**).
 
 ### Verification (ongoing)
-- [x] V-1 Build compiles against 26.3-snapshot-3 with the new Mixin.
+- [~] V-1 Build compiles against 26.3-snapshot-3 — **static checks only** in sandbox (no JDK 25 / no network); run `./gradlew build` on the dev machine to confirm.
 - [ ] V-2 Runtime handle-capture log check (needs Vulkan dev instance).
 - [ ] V-3 Numeric jitter check.
 - [ ] V-4 Motion-vector debug visualization.
@@ -85,7 +87,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 | Raw `VkQueue` | `...backend.vulkan.VulkanQueue` | `fetchVkQueue(): org.lwjgl.vulkan.VkQueue`, `queueFamilyIndex` |
 | Device/extension creation | `...backend.vulkan.VulkanBackend` | `createDevice`, `vkCreateDevice`, `setWindowHints` |
 | VK features/extensions | `...backend.vulkan.init.{FeatureSet, VulkanFeature, VulkanPNextStruct}` | add DLSS-required features/extensions |
-| Jitter | `net.minecraft.client.renderer.GameRenderer` | projection via `ProjectionMatrixBuffer` / `Projection` → `GpuBufferSlice`; `levelProjectionMatrixBuffer` |
+| Jitter (apply) | `net.minecraft.client.renderer.Projection` | `getMatrix(): Matrix4f` — jitter the returned matrix (only while level-render window open) |
+| Jitter (scope) | `net.minecraft.client.renderer.GameRenderer` | `renderLevel` HEAD/RETURN opens/closes the jitter window; separate `levelProjectionMatrixBuffer` vs `hud3dProjectionMatrixBuffer` |
 | Composite / post | `net.minecraft.client.renderer.{PostChain, PostPass, PostChainConfig}` + `...renderer.oit.*` | upscale composite + UI-at-native pass |
 
 Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
@@ -105,6 +108,7 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-10 | Build our own motion vectors. | Spike R1: no MV/TAA infra exists in 26.3-snapshot-3. |
 | 2026-07-10 | DLSS **SR only** for v1 (no FG/RR/Reflex). | Scope control for prototype. |
 | 2026-07-10 | Git DB in sandbox `/tmp`, work-tree on the mount; export `.bundle` for persistence. | Cowork mount blocks file deletion, which breaks an in-place `.git`. |
+| 2026-07-10 | Jitter scoped to the level render via a `renderLevel` active-window flag; jitter applied at `Projection.getMatrix()` return as a copy. | No `getProjectionMatrix` exists in 26.3; `Projection.getMatrix()` is the real seam, and windowing keeps the HUD unjittered without shadowing uncertain fields. |
 
 ---
 
