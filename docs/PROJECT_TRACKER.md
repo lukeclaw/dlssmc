@@ -12,6 +12,8 @@
 
 ## ▶ RESUME HERE (where we left off)
 
+> **To verify/help this iteration, follow [`VERIFY.md`](./VERIFY.md).** Start with Gate A (the `javap` dumps).
+
 - **Done:** Risk spikes 1/1b/2/3 complete (see findings). PRD + tracker written. Git
   baseline established. Phase-1 Vulkan handle-capture scaffold (`VulkanDeviceMixin` +
   `DlssRenderState`) **and** jitter scaffold (`DlssJitter` + `GameRendererMixin` +
