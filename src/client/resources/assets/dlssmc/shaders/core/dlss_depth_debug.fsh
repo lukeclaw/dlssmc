@@ -1,8 +1,9 @@
 #version 330
 
-// Minimal debug shader: sample the scene depth (bound as InSampler) and show it as
-// grayscale. Proves custom-pipeline + custom-shader loading + depth-sampler binding —
-// the plumbing the motion-vector pass needs — before the matrices UBO is added.
+// Diagnostic split: LEFT half = raw scene depth as grayscale (tests depth sampling);
+// RIGHT half = a pure UV gradient that needs no texture (a witness that the pipeline,
+// shader and full-screen draw actually run). This separates "plumbing broken" from
+// "depth sampling / reverse-Z" as the cause of the black screen.
 uniform sampler2D InSampler;
 
 in vec2 texCoord;
@@ -11,5 +12,9 @@ out vec4 fragColor;
 
 void main() {
     float d = texture(InSampler, texCoord).r;
-    fragColor = vec4(vec3(d), 1.0);
+    if (texCoord.x < 0.5) {
+        fragColor = vec4(vec3(d), 1.0);
+    } else {
+        fragColor = vec4(texCoord.x, texCoord.y, 0.0, 1.0);
+    }
 }
