@@ -41,3 +41,6 @@ replay_*.log
 
 # sandbox scratch (mount blocks deletion)
 docs/_roundtrip_test.txt
+
+# git history export (regenerated each session)
+dlssmc-history.bundle
