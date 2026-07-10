@@ -26,11 +26,14 @@
   `VulkanDeviceMixin` promoted to `require=1`.
 - **S2 CONFIRMED** (Gate C): both jitter mixins fire; offsets/NDC exact; all 3 mixins
   now `require=1`. **Milestone M1 complete.**
-- **Next up (fork):** either **P1-5** resolution decoupling (render 3D to a low-res
-  offscreen target, composite UI at native) or begin **P2-1/P2-2** DLSS wiring (needs
-  the Streamline SDK downloaded first). See chat for the decision.
-- Note: jitter alone (no resolver yet) causes mild sub-pixel shimmer — expected until
-  DLSS resolves it; can be gated behind a flag if it bothers dev testing.
+- **In progress: P1-5 resolution decoupling** (chosen workstream). Source read done:
+  world+GUI both render into a single `mainRenderTarget` (`MainTarget`, window-sized);
+  `RenderTarget.blitAndBlendToTexture(out, outDepth)` (NEAREST) is the upscale primitive;
+  `TextureTarget` is the offscreen class. Plan: render world into a scaled `TextureTarget`,
+  blit-upscale into `mainRenderTarget`, GUI stays native.
+- **First, though:** re-verify the jitter fix (world projection) — rebuild + run, expect
+  `[DLSSmc] jitter applied to WORLD projection` and visible sub-pixel shimmer on the
+  whole world (not just the held item).
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -65,7 +68,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-1 Vulkan handle-capture (`VulkanDeviceMixin` + `DlssRenderState`): **runtime-confirmed (S1)** — device=0x2197..880, graphicsQueue=0x2197..cd0, family=0 on NVIDIA 596.49 / Vulkan 1.4. Mixin now `require=1`.
 - [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
-- [x] P1-4 Jitter injection **runtime-verified (S2)**: at phase=1, offsetPx=(-0.25, 0.1667) → ndc=(-5.85e-4, 6.94e-4) at 854x480; Halton math exact. All 3 mixins now `require=1`. (Applied on the window-res projection; will use internal render res automatically after P1-5.)
+- [~] P1-4 Jitter: Halton math verified (S2). **Correction (source read):** world projection is uploaded via `getBuffer(Matrix4f)`, which bypassed the old `Projection.getMatrix()` hook — that hook only hit the HUD/item projection. Retargeted to the world via `@ModifyArg` on `getBuffer(Matrix4f)` in `GameRendererMixin`; `ProjectionMixin` retired. Re-verify world jitter next run.
 - [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
 - [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
@@ -98,8 +101,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 | Raw `VkQueue` | `...backend.vulkan.VulkanQueue` | `fetchVkQueue(): org.lwjgl.vulkan.VkQueue`, `queueFamilyIndex` |
 | Device/extension creation | `...backend.vulkan.VulkanBackend` | `createDevice`, `vkCreateDevice`, `setWindowHints` |
 | VK features/extensions | `...backend.vulkan.init.{FeatureSet, VulkanFeature, VulkanPNextStruct}` | add DLSS-required features/extensions |
-| Jitter (apply) | `net.minecraft.client.renderer.Projection` | `getMatrix(Matrix4f): Matrix4f` — jitter the returned dest in place; scale via `width()/height()` (confirmed) |
-| Jitter (scope) | `net.minecraft.client.renderer.GameRenderer` | `renderLevel` HEAD/RETURN opens/closes the jitter window; separate `levelProjectionMatrixBuffer` vs `hud3dProjectionMatrixBuffer` |
+| Jitter (apply) | `GameRenderer.renderLevel` → `ProjectionMatrixBuffer.getBuffer(Matrix4f)` | `@ModifyArg` index 0 — jitter the **world** projection Matrix4f (HUD uses `getBuffer(Projection)`, left unjittered) |
+| Jitter (phase) | `net.minecraft.client.renderer.GameRenderer` | `renderLevel` HEAD advances Halton phase; RETURN closes window (Phase-2 bookkeeping) |
 | Composite / post | `net.minecraft.client.renderer.{PostChain, PostPass, PostChainConfig}` + `...renderer.oit.*` | upscale composite + UI-at-native pass |
 
 Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
@@ -119,7 +122,7 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-10 | Build our own motion vectors. | Spike R1: no MV/TAA infra exists in 26.3-snapshot-3. |
 | 2026-07-10 | DLSS **SR only** for v1 (no FG/RR/Reflex). | Scope control for prototype. |
 | 2026-07-10 | Git DB in sandbox `/tmp`, work-tree on the mount; export `.bundle` for persistence. | Cowork mount blocks file deletion, which breaks an in-place `.git`. |
-| 2026-07-10 | Jitter scoped to the level render via a `renderLevel` active-window flag; applied in place at `Projection.getMatrix(Matrix4f)` return, scaled by the projection's own `width()/height()`. | No `getProjectionMatrix` exists; `getMatrix` is the seam. Using the projection's own size stays correct after resolution decoupling (P1-5). |
+| 2026-07-10 | Jitter the **world** projection via `@ModifyArg` on `ProjectionMatrixBuffer.getBuffer(Matrix4f)` in `renderLevel`; retire the `Projection.getMatrix()` hook. | Source read showed the world uses `getBuffer(Matrix4f)` (no `getMatrix`); the old hook only jittered the HUD/item projection. `@ModifyArg` targets the exact world upload. |
 
 ---
 

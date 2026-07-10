@@ -79,7 +79,7 @@ public final class DlssJitter {
         projection.m21(projection.m21() + ndcY);
         if (!loggedApply) {
             loggedApply = true;
-            DLSSmc.LOGGER.info("[DLSSmc] jitter applied (ProjectionMixin.getMatrix hooked); dims={}x{} offsetPx=({}, {}) ndc=({}, {})",
+            DLSSmc.LOGGER.info("[DLSSmc] jitter applied to WORLD projection; dims={}x{} offsetPx=({}, {}) ndc=({}, {})",
                     width, height, offsetX, offsetY, ndcX, ndcY);
         }
         return projection;

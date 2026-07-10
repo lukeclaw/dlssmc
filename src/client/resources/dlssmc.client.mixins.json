@@ -4,8 +4,7 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"VulkanDeviceMixin",
-		"GameRendererMixin",
-		"ProjectionMixin"
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
