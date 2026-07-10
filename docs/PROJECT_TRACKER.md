@@ -26,14 +26,11 @@
   `VulkanDeviceMixin` promoted to `require=1`.
 - **S2 CONFIRMED** (Gate C): both jitter mixins fire; offsets/NDC exact; all 3 mixins
   now `require=1`. **Milestone M1 complete.**
-- **In progress: P1-5 resolution decoupling** (chosen workstream). Source read done:
-  world+GUI both render into a single `mainRenderTarget` (`MainTarget`, window-sized);
-  `RenderTarget.blitAndBlendToTexture(out, outDepth)` (NEAREST) is the upscale primitive;
-  `TextureTarget` is the offscreen class. Plan: render world into a scaled `TextureTarget`,
-  blit-upscale into `mainRenderTarget`, GUI stays native.
-- **First, though:** re-verify the jitter fix (world projection) — rebuild + run, expect
-  `[DLSSmc] jitter applied to WORLD projection` and visible sub-pixel shimmer on the
-  whole world (not just the held item).
+- **P1-5 implemented (scale=0.5), pending VISUAL verify (S3):** rebuild + run + load
+  world. Expect log `[DLSSmc] resolution decoupled: native WxH -> internal (W/2)x(H/2)`,
+  the **3D world visibly blocky/pixelated** while the **HUD (crosshair/hotbar/text) stays
+  crisp**. Send a screenshot. If black screen/crash, capture the log — likely the
+  `blitAndBlendToTexture` pipeline or the field-swap.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -44,7 +41,7 @@
 
 - [x] **M0 — Environment & recon** — template scaffolded, snapshot jar resolved, risks spiked.
 - [x] **M1 — Handles + jitter** — device+queue captured (S1) and jitter applied with correct Halton offsets (S2), both runtime-verified 2026-07-10.
-- [ ] **M2 — Resolution decoupling** — internal 3D res < output; UI composited at native res.
+- [~] **M2 — Resolution decoupling** — implemented (world→low-res target→upscale, HUD native); pending visual confirmation (S3).
 - [ ] **M3 — Motion vectors** — correct per-pixel MVs for chunks + entities (debug-viz verified).
 - [ ] **M4 — DLSS on** — Streamline manual-hooked; DLSS SR upscaling live.
 - [ ] **M5 — Quality bar** — no gross ghosting; reset flag correct; prototype demo.
@@ -69,7 +66,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
 - [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
-- [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
+- [~] P1-5 **Implemented**: `DlssResolution` owns a low-res `TextureTarget` (RGBA8/D32F); `GameRendererMixin` swaps `mainRenderTarget` for `renderLevel` (redirects the whole world render graph via `gameRenderer.mainRenderTarget()`), then `blitAndBlendToTexture` upscales into the native target before the HUD. scale=0.5 default. Pending visual verify (**S3**).
 - [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).

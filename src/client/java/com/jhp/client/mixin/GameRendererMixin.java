@@ -1,43 +1,69 @@
 package com.jhp.client.mixin;
 
 import com.jhp.client.dlss.DlssJitter;
+import com.jhp.client.dlss.DlssResolution;
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.pipeline.TextureTarget;
 import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * DLSS projection jitter, applied to the MAIN world projection. (Tracker task P1-4.)
- *
- * <p>The world/terrain projection is uploaded in {@code renderLevel} via
- * {@code ProjectionMatrixBuffer.getBuffer(Matrix4f)} (line ~626 of GameRenderer). The
- * HUD/item-in-hand projection uses the {@code getBuffer(Projection)} overload and is
- * intentionally left unjittered. We therefore jitter the {@code Matrix4f} argument of
- * the world-projection upload with {@link ModifyArg} — this hits exactly the scene
- * projection DLSS cares about.</p>
- *
- * <p>The HEAD/RETURN hooks advance the Halton phase once per level frame and mark the
- * jitter window (kept for Phase 2 bookkeeping).</p>
+ * Phase 1 rendering hooks on {@link GameRenderer}:
+ * <ul>
+ *   <li><b>Jitter (P1-4):</b> {@code @ModifyArg} on the world projection upload
+ *       ({@code getBuffer(Matrix4f)}). The HUD path ({@code getBuffer(Projection)}) is
+ *       left unjittered.</li>
+ *   <li><b>Resolution decoupling (P1-5):</b> swap {@code mainRenderTarget} to a low-res
+ *       offscreen target for the duration of {@code renderLevel}, then blit-upscale back
+ *       into the native target before the HUD renders. Because {@code LevelRenderer}
+ *       resolves its target via {@code gameRenderer.mainRenderTarget()}, this redirects
+ *       the entire world render graph to the internal resolution.</li>
+ * </ul>
+ * The jitter's NDC scale reads {@code mainRenderTarget.width/height}, which is the
+ * swapped (internal) target during {@code renderLevel}, so jitter auto-scales to the
+ * internal render resolution.
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
 
-    @Shadow @Final private RenderTarget mainRenderTarget;
+    @Mutable
+    @Shadow @Final
+    private RenderTarget mainRenderTarget;
+
+    @Unique
+    private RenderTarget dlssmc$savedTarget;
 
     @Inject(method = "renderLevel", at = @At("HEAD"), require = 1)
-    private void dlssmc$beginJitter(CallbackInfo ci) {
+    private void dlssmc$onRenderLevelHead(CallbackInfo ci) {
         DlssJitter.beginLevelFrame();
+        if (DlssResolution.enabled()) {
+            RenderTarget real = this.mainRenderTarget;
+            TextureTarget level = DlssResolution.ensureLevelTarget(real.width, real.height);
+            this.dlssmc$savedTarget = real;
+            this.mainRenderTarget = level; // world render graph now targets the low-res buffer
+        }
     }
 
     @Inject(method = "renderLevel", at = @At("RETURN"), require = 1)
-    private void dlssmc$endJitter(CallbackInfo ci) {
+    private void dlssmc$onRenderLevelReturn(CallbackInfo ci) {
         DlssJitter.endLevelFrame();
+        if (this.dlssmc$savedTarget != null) {
+            RenderTarget real = this.dlssmc$savedTarget;
+            TextureTarget level = DlssResolution.levelTarget();
+            // Upscale the low-res world into the native target (NEAREST; DLSS replaces this in Phase 2).
+            level.blitAndBlendToTexture(real.getColorTextureView(), real.getDepthTextureView());
+            this.mainRenderTarget = real;
+            this.dlssmc$savedTarget = null;
+        }
     }
 
     @ModifyArg(
