@@ -68,7 +68,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-1 Vulkan handle-capture (`VulkanDeviceMixin` + `DlssRenderState`): **runtime-confirmed (S1)** — device=0x2197..880, graphicsQueue=0x2197..cd0, family=0 on NVIDIA 596.49 / Vulkan 1.4. Mixin now `require=1`.
 - [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
-- [~] P1-4 Jitter: Halton math verified (S2). **Correction (source read):** world projection is uploaded via `getBuffer(Matrix4f)`, which bypassed the old `Projection.getMatrix()` hook — that hook only hit the HUD/item projection. Retargeted to the world via `@ModifyArg` on `getBuffer(Matrix4f)` in `GameRendererMixin`; `ProjectionMixin` retired. Re-verify world jitter next run.
+- [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
 - [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
 - [ ] P1-6 Composite HUD/UI at native res after upscale (hook `PostChain`/`PostPass` or main render path).
 - [ ] P1-7 Motion vectors: camera/global MVs first (reprojection of static geometry) (**S4** partial).
