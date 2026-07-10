@@ -47,3 +47,9 @@ dlssmc-history.bundle
 
 # Gate A verification dump (UTF-16 scratch)
 docs/javap_dump.txt
+
+# verification scratch (Gate B/C/D outputs)
+docs/build_out.txt
+docs/run_log.txt
+docs/*.png
+docs/javap_dump.txt
