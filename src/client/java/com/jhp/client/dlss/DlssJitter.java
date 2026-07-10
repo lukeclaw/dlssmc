@@ -5,18 +5,19 @@ import org.joml.Matrix4f;
 /**
  * Sub-pixel projection jitter for DLSS (Phase 1, tracker task P1-4).
  *
- * <p>Produces a Halton(2,3) low-discrepancy jitter sequence and applies it to the
- * level projection matrix. DLSS also consumes the current jitter offset (in pixels) as
- * a per-frame input, so both the applied matrix offset and the raw pixel offset are
- * exposed here for Phase 2.</p>
+ * <p>Produces a Halton(2,3) low-discrepancy jitter sequence and applies it to the level
+ * projection matrix. DLSS also consumes the current jitter offset (in pixels) as a
+ * per-frame input, so the raw pixel offset is exposed here for Phase 2.</p>
  *
  * <p>Scope is controlled by an "active" window: {@code GameRendererMixin} opens it
- * around the level (world) render so the HUD/UI projection is left unjittered.</p>
+ * around the level render so the HUD/UI projection is left unjittered. The NDC scale of
+ * the offset is computed from the {@code Projection}'s own width/height (see
+ * {@code ProjectionMixin}), which stays correct after resolution decoupling (P1-5).</p>
  *
  * <p><b>Correctness note:</b> the exact sign/space of the jitter (Y-up vs Vulkan
  * Y-down, NDC range) needs empirical render/look/adjust iteration on a real device
- * (see the brief). The sign flags below exist for that tuning — the defaults are a
- * starting point, not a final answer.</p>
+ * (see the brief). {@link #SIGN_X}/{@link #SIGN_Y} exist for that tuning — the defaults
+ * are a starting point, not a final answer.</p>
  */
 public final class DlssJitter {
     private DlssJitter() {}
@@ -36,11 +37,6 @@ public final class DlssJitter {
     private static volatile float offsetX = 0f;
     private static volatile float offsetY = 0f;
 
-    // Internal 3D render resolution used to convert the pixel offset into NDC.
-    // TODO(P1-5): feed the real decoupled internal render size; placeholder for now.
-    private static volatile int renderWidth = 1920;
-    private static volatile int renderHeight = 1080;
-
     /** Start of a level frame: advance the sequence and open the jitter window. */
     public static void beginLevelFrame() {
         phase = (phase + 1) % PHASE_COUNT;
@@ -59,17 +55,16 @@ public final class DlssJitter {
         return active;
     }
 
-    public static void setRenderResolution(int width, int height) {
-        if (width > 0 && height > 0) {
-            renderWidth = width;
-            renderHeight = height;
+    /**
+     * Apply the current jitter to {@code projection} in place, using the given render
+     * resolution to convert the pixel offset into NDC. Returns the same matrix.
+     */
+    public static Matrix4f applyTo(Matrix4f projection, float width, float height) {
+        if (width <= 0f || height <= 0f) {
+            return projection;
         }
-    }
-
-    /** Apply the current jitter to a projection matrix in place; returns it. */
-    public static Matrix4f applyTo(Matrix4f projection) {
-        float ndcX = SIGN_X * 2.0f * offsetX / renderWidth;
-        float ndcY = SIGN_Y * 2.0f * offsetY / renderHeight;
+        float ndcX = SIGN_X * 2.0f * offsetX / width;
+        float ndcY = SIGN_Y * 2.0f * offsetY / height;
         // Column-major (JOML): shift clip-space x,y via the z-column terms.
         projection.m20(projection.m20() + ndcX);
         projection.m21(projection.m21() + ndcY);

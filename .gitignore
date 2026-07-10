@@ -44,3 +44,6 @@ docs/_roundtrip_test.txt
 
 # git history export (regenerated each session)
 dlssmc-history.bundle
+
+# Gate A verification dump (UTF-16 scratch)
+docs/javap_dump.txt
