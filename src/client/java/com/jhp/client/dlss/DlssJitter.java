@@ -1,5 +1,6 @@
 package com.jhp.client.dlss;
 
+import com.jhp.DLSSmc;
 import org.joml.Matrix4f;
 
 /**
@@ -16,8 +17,7 @@ import org.joml.Matrix4f;
  *
  * <p><b>Correctness note:</b> the exact sign/space of the jitter (Y-up vs Vulkan
  * Y-down, NDC range) needs empirical render/look/adjust iteration on a real device
- * (see the brief). {@link #SIGN_X}/{@link #SIGN_Y} exist for that tuning — the defaults
- * are a starting point, not a final answer.</p>
+ * (see the brief). {@link #SIGN_X}/{@link #SIGN_Y} exist for that tuning.</p>
  */
 public final class DlssJitter {
     private DlssJitter() {}
@@ -37,6 +37,10 @@ public final class DlssJitter {
     private static volatile float offsetX = 0f;
     private static volatile float offsetY = 0f;
 
+    // One-shot diagnostics so a runtime log can confirm each mixin actually fires (S2).
+    private static volatile boolean loggedScope = false;
+    private static volatile boolean loggedApply = false;
+
     /** Start of a level frame: advance the sequence and open the jitter window. */
     public static void beginLevelFrame() {
         phase = (phase + 1) % PHASE_COUNT;
@@ -44,6 +48,11 @@ public final class DlssJitter {
         offsetX = halton(phase + 1, 2) - 0.5f;
         offsetY = halton(phase + 1, 3) - 0.5f;
         active = true;
+        if (!loggedScope) {
+            loggedScope = true;
+            DLSSmc.LOGGER.info("[DLSSmc] jitter scope active (GameRendererMixin.renderLevel hooked); phase={} offsetPx=({}, {})",
+                    phase, offsetX, offsetY);
+        }
     }
 
     /** End of the level frame: close the jitter window. */
@@ -68,6 +77,11 @@ public final class DlssJitter {
         // Column-major (JOML): shift clip-space x,y via the z-column terms.
         projection.m20(projection.m20() + ndcX);
         projection.m21(projection.m21() + ndcY);
+        if (!loggedApply) {
+            loggedApply = true;
+            DLSSmc.LOGGER.info("[DLSSmc] jitter applied (ProjectionMixin.getMatrix hooked); dims={}x{} offsetPx=({}, {}) ndc=({}, {})",
+                    width, height, offsetX, offsetY, ndcX, ndcY);
+        }
         return projection;
     }
 

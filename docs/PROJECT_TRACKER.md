@@ -22,10 +22,12 @@
   ctor + `vkDevice`/`graphicsQueue` fields; `VulkanQueue` is a record (`vkQueue()`,
   `queueFamilyIndex()`); `GameRenderer.renderLevel(DeltaTracker)` void; `Projection.
   getMatrix(Matrix4f)` + `width()/height()`. Mixins updated to match; queue capture added.
-- **Gate B PASSED** (BUILD SUCCESSFUL, JDK 25 toolchain). **Next up: Gate C** —
-  `runClient`, enable "Prefer Vulkan", load a world: confirm `[DLSSmc] Vulkan device
-  captured` (**S1**) and a stable static image with jitter on (**S2**). Then flip mixin
-  `require = 0` → `1`.
+- **S1 CONFIRMED** (Gate C): device+queue captured on NVIDIA 596.49 / Vulkan 1.4;
+  `VulkanDeviceMixin` promoted to `require=1`.
+- **Next up:** rebuild + run again — new one-shot logs will confirm whether the jitter
+  mixins fire (`[DLSSmc] jitter scope active` + `[DLSSmc] jitter applied ... dims=...`)
+  → verifies **S2** numerically. If both appear, flip `GameRendererMixin`/`ProjectionMixin`
+  to `require=1`; if not, the missing log says which one to fix.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -35,7 +37,7 @@
 ## Milestones
 
 - [x] **M0 — Environment & recon** — template scaffolded, snapshot jar resolved, risks spiked.
-- [ ] **M1 — Handles + jitter** — Vulkan handles captured at runtime; jitter provably applied.
+- [~] **M1 — Handles + jitter** — handles captured at runtime ✅ (S1); jitter application pending log confirmation (S2).
 - [ ] **M2 — Resolution decoupling** — internal 3D res < output; UI composited at native res.
 - [ ] **M3 — Motion vectors** — correct per-pixel MVs for chunks + entities (debug-viz verified).
 - [ ] **M4 — DLSS on** — Streamline manual-hooked; DLSS SR upscaling live.
@@ -57,8 +59,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P0-7 Git baseline + docs.
 
 ### Phase 1 — Rendering rework (mod side)
-- [x] P1-1 Vulkan handle-capture (`VulkanDeviceMixin` + `DlssRenderState`): captures `VkDevice` **and** graphics `VkQueue`+family. Signatures javap-confirmed; runtime unverified.
-- [~] P1-2 Descriptors **confirmed via javap** (Gate A done). Remaining: verify non-null `VkDevice`/`VkQueue` at runtime (**S1**, Gate C).
+- [x] P1-1 Vulkan handle-capture (`VulkanDeviceMixin` + `DlssRenderState`): **runtime-confirmed (S1)** — device=0x2197..880, graphicsQueue=0x2197..cd0, family=0 on NVIDIA 596.49 / Vulkan 1.4. Mixin now `require=1`.
+- [x] P1-2 Descriptors confirmed via javap + **runtime capture verified (S1)** on real hardware.
 - [ ] P1-3 Capture swapchain images + per-frame command buffer(s) needed for SL tagging.
 - [~] P1-4 Jitter injection **scaffolded**: `DlssJitter` (Halton(2,3), 16-phase, pixel+NDC offset, reset flag) + `GameRendererMixin` scopes jitter to `renderLevel` + `ProjectionMixin` jitters `Projection.getMatrix()` return. Confirm descriptors + verify numerically (**S2**); feed real render res after P1-5.
 - [ ] P1-5 Decouple internal 3D render resolution from output; render world to an offscreen target (**S3**).
@@ -78,7 +80,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 
 ### Verification (ongoing)
 - [x] V-1 **BUILD SUCCESSFUL** on the dev machine (JDK 25 toolchain) — all mixins + DlssJitter/DlssRenderState compile against 26.3-snapshot-3 (2026-07-10).
-- [ ] V-2 Runtime handle-capture log check (needs Vulkan dev instance).
+- [x] V-2 Runtime handle-capture confirmed — non-zero device+queue handles logged (2026-07-10).
 - [ ] V-3 Numeric jitter check.
 - [ ] V-4 Motion-vector debug visualization.
 - [ ] V-5 DLSS active + internal-res reduction confirmed.

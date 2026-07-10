@@ -26,8 +26,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *     public VulkanDevice(VulkanInstance, VulkanPhysicalDevice, FeatureSet, VkDevice, long, CheckpointExtension)  // sole ctor
  * </pre>
  *
- * <p>{@code require = 0} until the runtime log (Gate C) confirms the injection fires;
- * then this can be tightened to {@code require = 1}.</p>
+ * <p>Runtime-confirmed (Gate C, 2026-07-10): device+graphicsQueue captured with
+ * non-zero handles; now {@code require = 1}.</p>
  */
 @Mixin(VulkanDevice.class)
 public abstract class VulkanDeviceMixin {
@@ -35,7 +35,7 @@ public abstract class VulkanDeviceMixin {
     @Shadow @Final private VkDevice vkDevice;
     @Shadow @Final private VulkanQueue graphicsQueue;
 
-    @Inject(method = "<init>", at = @At("TAIL"), require = 0)
+    @Inject(method = "<init>", at = @At("TAIL"), require = 1) // S1 confirmed on NVIDIA 596.49 / Vulkan 1.4
     private void dlssmc$onDeviceCreated(CallbackInfo ci) {
         VkQueue gq = this.graphicsQueue != null ? this.graphicsQueue.vkQueue() : null;
         int family = this.graphicsQueue != null ? this.graphicsQueue.queueFamilyIndex() : -1;
