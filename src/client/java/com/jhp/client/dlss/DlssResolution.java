@@ -10,12 +10,11 @@ import com.mojang.renderpearl.api.GpuFormat;
  * <p>Owns a single offscreen {@link TextureTarget} that the world is rendered into at a
  * fraction of the native resolution. {@code GameRendererMixin} swaps
  * {@code GameRenderer.mainRenderTarget} to this target for the duration of
- * {@code renderLevel}, so the entire world render graph (terrain, sky, OIT, entities,
- * item-in-hand, screen effects) runs at the internal resolution, then blit-upscales the
- * result back into the real native target before the HUD draws.</p>
+ * {@code renderLevel}, so the entire world render graph runs at the internal resolution,
+ * then blit-upscales the result back into the real native target before the HUD draws.</p>
  *
- * <p>Formats match {@code MainTarget}: {@code RGBA8_UNORM} color + {@code D32_FLOAT}
- * depth. The blit currently uses NEAREST (blocky) — DLSS will replace it in Phase 2.</p>
+ * <p>Formats match {@code MainTarget}: {@code RGBA8_UNORM} + {@code D32_FLOAT}. The blit
+ * currently uses NEAREST (blocky) — DLSS will replace it in Phase 2.</p>
  */
 public final class DlssResolution {
     private DlssResolution() {}
@@ -23,8 +22,20 @@ public final class DlssResolution {
     /** Internal render scale as a fraction of native. 1.0 disables decoupling. */
     public static volatile float scale = 0.5f; // DLSS Quality~0.667, Performance~0.5
 
+    /** Scales cycled by the F8 keybind: native (off), Quality, Performance. */
+    private static final float[] SCALES = {1.0f, 0.667f, 0.5f};
+    private static int scaleIndex = 2; // matches the 0.5f default
+
     private static TextureTarget levelTarget;
     private static boolean loggedOnce = false;
+
+    /** Advance to the next render scale (F8). */
+    public static void cycleScale() {
+        scaleIndex = (scaleIndex + 1) % SCALES.length;
+        scale = SCALES[scaleIndex];
+        loggedOnce = false; // re-log the new internal resolution on the next frame
+        DLSSmc.LOGGER.info("[DLSSmc] render scale -> {} ({})", scale, enabled() ? "decoupled" : "native/off");
+    }
 
     /** True when the scale calls for a real downscale. */
     public static boolean enabled() {
