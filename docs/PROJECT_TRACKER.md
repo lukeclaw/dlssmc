@@ -22,9 +22,10 @@
   ctor + `vkDevice`/`graphicsQueue` fields; `VulkanQueue` is a record (`vkQueue()`,
   `queueFamilyIndex()`); `GameRenderer.renderLevel(DeltaTracker)` void; `Projection.
   getMatrix(Matrix4f)` + `width()/height()`. Mixins updated to match; queue capture added.
-- **Next up:** run **Gate B** (`./gradlew build`) then **Gate C** (`runClient`, enable
-  Vulkan) — confirm `[DLSSmc] Vulkan device captured` (**S1**) and stable static image
-  with jitter on (**S2**). Then flip mixin `require = 0` → `1`.
+- **Gate B PASSED** (BUILD SUCCESSFUL, JDK 25 toolchain). **Next up: Gate C** —
+  `runClient`, enable "Prefer Vulkan", load a world: confirm `[DLSSmc] Vulkan device
+  captured` (**S1**) and a stable static image with jitter on (**S2**). Then flip mixin
+  `require = 0` → `1`.
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
@@ -76,7 +77,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [ ] P2-6 **[!] Human:** read NVIDIA Streamline SDK EULA in the release zip; resolve redistribution before shipping (**Risk 3**).
 
 ### Verification (ongoing)
-- [~] V-1 Build compiles against 26.3-snapshot-3 — **static checks only** in sandbox (no JDK 25 / no network); run `./gradlew build` on the dev machine to confirm.
+- [x] V-1 **BUILD SUCCESSFUL** on the dev machine (JDK 25 toolchain) — all mixins + DlssJitter/DlssRenderState compile against 26.3-snapshot-3 (2026-07-10).
 - [ ] V-2 Runtime handle-capture log check (needs Vulkan dev instance).
 - [ ] V-3 Numeric jitter check.
 - [ ] V-4 Motion-vector debug visualization.
