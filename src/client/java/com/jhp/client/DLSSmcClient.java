@@ -4,6 +4,7 @@ import com.jhp.DLSSmc;
 import com.jhp.client.dlss.DlssRenderState;
 import com.jhp.client.dlss.DlssResolution;
 import com.jhp.client.dlss.DlssVelocity;
+import com.jhp.client.dlss.SlBridge;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 
@@ -34,6 +35,11 @@ public class DLSSmcClient implements ClientModInitializer {
 									"[DLSSmc] motion-vector overlay: " + (DlssVelocity.showDebug ? "ON" : "OFF")
 									+ (DlssVelocity.showDebug && !DlssResolution.enabled()
 											? " (needs render scale < 1.0 to display)" : "")));
+							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("sl").executes(ctx -> {
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] Streamline: " + SlBridge.status()));
 							return 1;
 						}))
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("scale").executes(ctx -> {

@@ -16,9 +16,26 @@
 > **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
 > directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
-**STATUS (2026-07-10, end of MV sessions): M0–M3 COMPLETE, runtime-verified. Phase 2
-(DLSS wiring) is next; Streamline SDK v2.12.0 is extracted in the repo root
-(gitignored — NVIDIA license).**
+**STATUS (2026-07-11, later): P2-1/P2-2 RUNTIME-VERIFIED — DLSS reported SUPPORTED,
+NGX + DLSS plugin fully initialized against Minecraft's own Vulkan device. NEXT: P2-3 —
+per-frame plumbing: slGetNewFrameToken + slSetConstants (jitter from DlssJitter, MVs
+scale, reset flag stub) + slSetTagForFrame (color=level target LOW-RES pre-upscale,
+depth **pre-hand-clear at LevelRenderer.render RETURN**, MV=DlssVelocity target,
+output=native target) + slEvaluateFeature(kFeatureDLSS) replacing the NEAREST blit in
+the P1-5 upscale path; slDLSSSetOptions via slGetFeatureFunction. Needs VkCommandBuffer
+capture (P1-3 — still open) at the blit site. Then P2-4 reset flag, P2-5 tuning.
+Original step-1 notes:**
+`SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
+`VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's
+creation proxies (P2-1 collapsed into P2-2 as planned — SL adds extensions/features/
+queues itself; no `slSetVulkanInfo` needed). slInit runs lazily inside the
+vkCreateInstance redirect (robust vs loader ordering). `/dlssmc sl` prints SL status;
+after device creation the log shows `slIsFeatureSupported(kFeatureDLSS)`. Loom client
+run now passes `--enable-native-access=ALL-UNNAMED` (FFM restricted methods, JDK 25).
+@Redirect targets verified against constant pool of the real class files (owner VK12,
+descriptors exact). Swapchain/present hooks in sl_hooks.h are DLSS-G-only → skipped
+(DLSS-SR scope). ABI offsets for sl::Preferences/AdapterInfo documented in SlBridge
+javadoc. Streamline SDK v2.12.0 extracted at repo root (gitignored — NVIDIA license).**
 
 - **M1/M2 (earlier):** Vulkan device+queue captured (S1); Halton jitter on the world
   projection (S2); resolution decoupling — world at `DlssResolution.scale` (default
@@ -98,8 +115,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-10 Depth: RESOLVED — renderer is REVERSE-Z (GEQUAL default, NDC z≈near/dist), `D32_FLOAT`. The old "depth samples as 0" finding was (at least partly) the renderItemInHand depth-CLEAR: GameRenderer wipes level depth to far (0.0) mid-renderLevel. Depth IS usable as an attachment pre-clear (the prepass proves it). For P2-3 the DLSS depth tag must be taken at LevelRenderer.render RETURN.
 
 ### Phase 2 — DLSS integration
-- [ ] P2-1 Inject DLSS-required VK **instance/device extensions + features** into `VulkanBackend`/`VulkanInstance`/`FeatureSet` before `vkCreateDevice`.
-- [ ] P2-2 Wire Streamline **manual hooking** (`slSetVulkanInfo`, `slGetNativeInterface`/`slUpgradeInterface`) against Minecraft's device.
+- [x] P2-1 ~~Inject extensions/features manually~~ — COLLAPSED into P2-2: SL's `vkCreateInstance`/`vkCreateDevice` proxies add all required extensions, features and queues (ManualHooking guide §4.2).
+- [x] P2-2 Streamline manual hooking — **RUNTIME-VERIFIED 2026-07-11**: `slIsFeatureSupported(kFeatureDLSS): SUPPORTED` on RTX 4070 SUPER / driver 596.49 / VK 1.4.329; device created via SL proxy (0x17769ac0b40, same handle captured by VulkanDeviceMixin); NGX loaded nvngx_dlss.dll v310.7.0 and set DLSS cubins (arch 0x190); game runs normally on Vulkan backend. Fix history: (a) iteration-1 crash root-caused below; (b) invokeExact ternary→Object WrongMethodTypeException in the enum bridge (typed local fixes it); (c) markChainBroken() guard added so partial proxy fallback can't recreate the crash. Note for P2-3: SL warns Vulkan hooks CmdBindPipeline/CmdBindDescriptorSets/BeginCommandBuffer "NOT supported" — expected with eDisableCLStateTracking, revisit only if slEvaluateFeature misbehaves. NGX used default app ID 100721531 + our projectId (cms id 876232c). Iteration-1 crash post-mortem: EXCEPTION_ACCESS_VIOLATION at pc=0x0 inside SL's vkCreateDevice, *after* extension merge. Cause (verified in SDK source `source/core/sl.interposer/vulkan/wrapper.cpp`): SL's post-create path does `s_vk.instance = instanceDeviceMap[physicalDevice]` (line 940); that map is only filled by SL's `vkEnumeratePhysicalDevices` hook (line 982), which Mojang bypassed → null instance → dispatch rebuilt from `vkGetInstanceProcAddr(NULL,…)` → plugin init calls null fn ptr. FIX: redirect `VK12.vkEnumeratePhysicalDevices` in `VulkanBackend.findPhysicalDevice` through the interposer too, and gate the whole proxied chain on `SlBridge.isInstanceProxied()` (all-or-nothing). LESSON: when using SL's creation proxies, EVERY interposer-intercepted entry point Mojang calls must be routed through SL (SL_INTERCEPT list, wrapper.cpp ~2360: GetInstance/DeviceProcAddr, Create/DestroyInstance, Create/DestroyDevice, EnumeratePhysicalDevices, QueuePresent, CreateImage, CmdPipelineBarrier, BeginCommandBuffer, swapchain fns, DeviceWaitIdle). Known residuals, likely fine for SR but check if weirdness: vkDestroyInstance/vkDestroyDevice not routed (backend restart would leave SL stale), vkCreateImage/vkCmdPipelineBarrier/vkBeginCommandBuffer not routed (may matter for P2-3 tagging). Awaiting Gate C iteration 2.
 - [ ] P2-3 Tag per-frame buffers into SL: color (low-res), output, depth, motion vectors, jitter offset, exposure/HDR.
 - [ ] P2-4 Fire DLSS **reset flag** on teleport/portal/respawn/dimension change (**S7**).
 - [ ] P2-5 Artifact tuning: ghosting on foliage/particles/thin geometry; disocclusion at chunk edges (**S6**).
@@ -138,4 +155,6 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-07-10 | Pin `26.3-snapshot-3`; bump deliberately. | Vulkan internals change weekly (PRD §7). |
-| 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a cle
+| 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a clean Vulkan path. |
+| 2026-07-11 | P2-1 collapsed into P2-2 via SL creation proxies; swapchain/present hooks skipped. | ManualHooking guide §4.2: proxies add required extensions/features/queues; sl_hooks.h swapchain hooks only matter for Frame Generation (out of scope). |
+| 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempotent for backend restarts. |

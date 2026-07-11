@@ -192,11 +192,24 @@ Screenshots or a short clip while moving:
 
 ---
 
-## What Claude needs from THIS iteration
+## What Claude needs from THIS iteration (Phase 2, step 1 — Streamline init)
 
-1. **Gate A** output (the four `javap` dumps) — unblocks locking all descriptors.
-2. **Gate B** result after Claude adjusts from Gate A.
-3. **Gate C** `grep` output once it builds.
+1. **Gate B** — `gradlew build` (or run from IDE). New code: `SlBridge` (FFM),
+   `VulkanInstanceMixin`, `VulkanBackendMixin`, `/dlssmc sl` command, loom vmArg.
+2. **Gate C** — launch with the Vulkan backend, then:
+   ```bash
+   grep -nE "DLSSmc|Streamline|Mixin|Exception|ERROR" run/logs/latest.log | head -80
+   ```
+   Expected lines, in order:
+   - `[DLSSmc] loading Streamline interposer from <...streamline-sdk-v2.12.0\bin\x64>`
+   - `[DLSSmc] slInit OK (SDK 2.12.0, manual hooking, feature=DLSS) ...`
+   - `[DLSSmc] vkCreateInstance via Streamline proxy -> VkResult=0 instance=0x...`
+   - `[DLSSmc] vkCreateDevice via Streamline proxy -> VkResult=0 device=0x...`
+   - `[DLSSmc] slIsFeatureSupported(kFeatureDLSS): SUPPORTED` ← the money line (V-5 evidence)
+   - plus `[Streamline] ...` lines (SL's own log routed into MC's log)
+   In-game `/dlssmc sl` prints the same status. If SL fails to init, the game must still
+   boot normally on vanilla Vulkan (fallback path) — that's also a pass for the fallback,
+   paste the failure lines so Claude can fix init.
 
 Paste each as you get it — you don't have to do all gates before replying.
 

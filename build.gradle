@@ -17,6 +17,14 @@ repositories {
 loom {
 	splitEnvironmentSourceSets()
 
+	runs {
+		client {
+			// Phase 2: SlBridge uses FFM (Panama) restricted methods to load NVIDIA
+			// Streamline's sl.interposer.dll — JDK 25 requires opting in to native access.
+			vmArg "--enable-native-access=ALL-UNNAMED"
+		}
+	}
+
 	mods {
 		"dlssmc" {
 			sourceSet sourceSets.main
