@@ -58,6 +58,10 @@ public final class SlBridge {
 
     public static final int SL_OK = 0;
     public static final int K_FEATURE_DLSS = 0;
+    // FG-2: frame-generation feature set (sl_core_types.h).
+    public static final int K_FEATURE_REFLEX = 3;
+    public static final int K_FEATURE_PCL = 4;
+    public static final int K_FEATURE_DLSS_G = 1000;
 
     /** (2<<48) | (12<<32) | (0<<16) | kSDKVersionMagic(0xfedc) — SDK v2.12.0. */
     private static final long SDK_VERSION = 0x0002_000C_0000_FEDCL;
@@ -243,14 +247,24 @@ public final class SlBridge {
             info.set(ADDRESS, 32, MemorySegment.NULL);                              // deviceLUID
             info.set(JAVA_INT, 40, 0);                                              // luidSize
             info.set(ADDRESS, 48, MemorySegment.ofAddress(vkPhysicalDeviceAddr));   // vkPhysicalDevice
-            int r = (int) hSlIsFeatureSupported.invokeExact(K_FEATURE_DLSS, info);
-            if (r == SL_OK) {
-                statusLine += "; DLSS SUPPORTED on this adapter";
-                DLSSmc.LOGGER.info("[DLSSmc] slIsFeatureSupported(kFeatureDLSS): SUPPORTED");
-            } else {
-                statusLine += "; DLSS NOT supported: sl::Result=" + r;
-                DLSSmc.LOGGER.warn("[DLSSmc] slIsFeatureSupported(kFeatureDLSS) -> sl::Result={} "
-                        + "(sl_result.h; 2=driver out of date, 4/5=no supported adapter)", r);
+            // FG-2: check every loaded feature so Gate C confirms DLSS-G availability.
+            int[] checkIds = { K_FEATURE_DLSS, K_FEATURE_DLSS_G, K_FEATURE_REFLEX, K_FEATURE_PCL };
+            String[] checkNames = { "kFeatureDLSS", "kFeatureDLSS_G", "kFeatureReflex", "kFeaturePCL" };
+            for (int i = 0; i < checkIds.length; i++) {
+                int featureId = checkIds[i];
+                int r = (int) hSlIsFeatureSupported.invokeExact(featureId, info);
+                if (r == SL_OK) {
+                    DLSSmc.LOGGER.info("[DLSSmc] slIsFeatureSupported({}): SUPPORTED", checkNames[i]);
+                    if (featureId == K_FEATURE_DLSS) {
+                        statusLine += "; DLSS SUPPORTED on this adapter";
+                    }
+                } else {
+                    DLSSmc.LOGGER.warn("[DLSSmc] slIsFeatureSupported({}) -> sl::Result={} "
+                            + "(sl_result.h; 2=driver out of date, 4/5=no supported adapter)", checkNames[i], r);
+                    if (featureId == K_FEATURE_DLSS) {
+                        statusLine += "; DLSS NOT supported: sl::Result=" + r;
+                    }
+                }
             }
         } catch (Throwable t) {
             DLSSmc.LOGGER.error("[DLSSmc] slIsFeatureSupported call failed", t);
@@ -364,8 +378,14 @@ public final class SlBridge {
         MemorySegment paths = arena.allocate(ADDRESS);
         paths.set(ADDRESS, 0, pathW);
 
-        MemorySegment features = arena.allocate(JAVA_INT);
-        features.set(JAVA_INT, 0, K_FEATURE_DLSS);
+        // FG-2: load DLSS-SR + Reflex + PCL + DLSS-G. SL's vkCreateDevice proxy adds
+        // each feature's extra device extensions/features/queues automatically.
+        int[] featureIds = { K_FEATURE_DLSS, K_FEATURE_REFLEX, K_FEATURE_PCL, K_FEATURE_DLSS_G };
+        MemorySegment features = arena.allocate((long) JAVA_INT.byteSize() * featureIds.length,
+                JAVA_INT.byteAlignment());
+        for (int i = 0; i < featureIds.length; i++) {
+            features.setAtIndex(JAVA_INT, i, featureIds[i]);
+        }
 
         MemorySegment prefs = arena.allocate(144, 8);
         writeHeader(prefs,
@@ -382,8 +402,8 @@ public final class SlBridge {
         prefs.set(ADDRESS, 80, logStub);                          // logMessageCallback
         prefs.set(JAVA_LONG, 88, FLAG_DISABLE_CL_STATE_TRACKING | FLAG_USE_MANUAL_HOOKING
                 | FLAG_USE_FRAME_BASED_RESOURCE_TAGGING);
-        prefs.set(ADDRESS, 96, features);                         // featuresToLoad = {kFeatureDLSS}
-        prefs.set(JAVA_INT, 104, 1);                              // numFeaturesToLoad
+        prefs.set(ADDRESS, 96, features);                         // featuresToLoad = {DLSS,Reflex,PCL,DLSS_G}
+        prefs.set(JAVA_INT, 104, featureIds.length);              // numFeaturesToLoad = 4 (FG-2)
         prefs.set(JAVA_INT, 108, 0);                              // applicationId (using projectId instead)
         prefs.set(JAVA_INT, 112, 0);                              // engine = eCustom
         prefs.set(ADDRESS, 120, arena.allocateFrom("26.3-snapshot-3"));   // engineVersion
