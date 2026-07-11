@@ -7,6 +7,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
@@ -90,19 +91,20 @@ public final class DlssVelocity {
     }
 
     /**
-     * Composite the velocity field translucently over the scene into {@code dest}.
-     * {@code sceneSource} is the low-res level target (sampled for the scene under the
-     * overlay — we cannot sample {@code dest} while rendering into it). Skipped when
-     * resolution decoupling is off (no separate scene texture to composite from).
+     * Draw the velocity tint translucently OVER the finished image in {@code dest}
+     * (alpha-blended). Deliberately does NOT sample/re-draw the scene: the first
+     * version reconstructed the screen from the half-res level texture, which softened
+     * the image and ghosted mismatched scene content through opaque blocks (Gate D
+     * 2026-07-10). Blending against the real backbuffer makes ghosting impossible and
+     * works with or without resolution decoupling.
      */
-    public static void blitDebug(RenderTarget sceneSource, RenderTarget dest) {
-        if (velocityTarget == null || sceneSource == null || dest == null) {
+    public static void blitDebug(RenderTarget dest) {
+        if (velocityTarget == null || dest == null) {
             return;
         }
-        GpuTextureView scene = sceneSource.getColorTextureView();
         GpuTextureView velocity = velocityTarget.getColorTextureView();
         GpuTextureView out = dest.getColorTextureView();
-        if (scene == null || velocity == null || out == null) {
+        if (velocity == null || out == null) {
             return;
         }
         CompiledRenderPipeline compiled = RenderSystem.getCompiledPipeline(debugPipeline());
@@ -112,8 +114,7 @@ public final class DlssVelocity {
                         Optional.empty(), null, OptionalDouble.empty())) {
             pass.setPipeline(compiled);
             RenderSystem.bindDefaultUniforms(pass);
-            pass.bindTexture("Sampler0", scene, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            pass.bindTexture("Sampler1", velocity, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            pass.bindTexture("InSampler", velocity, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             pass.draw(3, 1, 0, 0);
         }
     }
@@ -154,8 +155,9 @@ public final class DlssVelocity {
                     .withLocation(Identifier.fromNamespaceAndPath("dlssmc", "pipeline/velocity_debug"))
                     .withVertexShader("core/screenquad")
                     .withFragmentShader(Identifier.fromNamespaceAndPath("dlssmc", "core/dlss_velocity_debug"))
-                    .withBindGroupLayout(BindGroupLayouts.SAMPLER0_SAMPLER1)
-                    .withColorTargetState(ColorTargetState.DEFAULT)
+                    .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
+                    // Alpha-blend the tint over the finished frame (see blitDebug).
+                    .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
                     .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                     .withCull(false)
                     .build();

@@ -88,11 +88,11 @@ public abstract class GameRendererMixin {
             this.mainRenderTarget = real;
             this.dlssmc$savedTarget = null;
         }
-        // Debug overlay (/dlssmc mv): composite scene + velocity onto the NATIVE target
-        // (after restore). Needs the level target as the scene source, so it requires
-        // resolution decoupling to be active.
-        if (DlssVelocity.enabled && DlssVelocity.showDebug && DlssResolution.enabled()) {
-            DlssVelocity.blitDebug(DlssResolution.levelTarget(), this.mainRenderTarget);
+        // Debug overlay (/dlssmc mv): alpha-blend the velocity tint over the finished
+        // NATIVE image (after restore). No scene sampling -> no ghosting; also works
+        // without resolution decoupling.
+        if (DlssVelocity.enabled && DlssVelocity.showDebug) {
+            DlssVelocity.blitDebug(this.mainRenderTarget);
         }
     }
 
