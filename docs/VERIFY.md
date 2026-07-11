@@ -91,6 +91,56 @@ run from `docs\`).
 
 ---
 
+## Gate A3 — MRT injection recon (P1-7 slice 2, run once)
+
+Pins the remaining APIs for the terrain-velocity MRT work: custom bind-group layouts
+(for the DlssReprojection UBO in the terrain shaders), multi-attachment render passes,
+snippet-based pipeline building, and the exact call sites inside `LevelRenderer`.
+
+```powershell
+$JAR = (Get-ChildItem -Recurse .gradle\loom-cache -Filter 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | Select-Object -First 1).FullName
+
+& {
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.BindGroupLayout
+  javap -p -cp "$JAR" 'com.mojang.renderpearl.api.pipeline.BindGroupLayout$Builder'
+  javap -p -cp "$JAR" 'com.mojang.renderpearl.api.pipeline.BindGroupLayout$UniformDescription'
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.commands.CommandEncoder
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.commands.RenderPass
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.RenderPipeline
+  javap -p -cp "$JAR" 'com.mojang.renderpearl.api.pipeline.RenderPipeline$Snippet'
+  javap -p -cp "$JAR" net.minecraft.client.renderer.LevelTargetBundle
+} *> docs\javap_a3_dump.txt
+
+# Bytecode of LevelRenderer (large file, ~1-2 MB is fine) — Claude greps it for the
+# createRenderPass / setPipeline call sites in addMainPass/executeSolid.
+javap -c -p -cp "$JAR" net.minecraft.client.renderer.LevelRenderer *> docs\javap_levelrenderer_c.txt
+```
+
+Then say **"done"**.
+
+---
+
+## Gate A4 — Velocity-prepass recon (P1-7 slice 2, final round)
+
+```powershell
+$JAR = (Get-ChildItem -Recurse .gradle\loom-cache -Filter 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | Select-Object -First 1).FullName
+
+& {
+  javap -p -cp "$JAR" net.minecraft.client.renderer.chunk.ChunkSectionsToRender
+  javap -p -cp "$JAR" net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.DepthStencilState
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.UniformType
+  javap -p -cp "$JAR" 'com.mojang.renderpearl.api.commands.RenderPassDescriptor$Builder'
+} *> docs\javap_a4_dump.txt
+
+javap -c -p -cp "$JAR" net.minecraft.client.renderer.chunk.ChunkSectionsToRender *> docs\javap_cstr_c.txt
+javap -c -p -cp "$JAR" net.minecraft.client.renderer.RenderPipelines *> docs\javap_pipelines_c.txt
+```
+
+Then say **"done"**.
+
+---
+
 ## Gate B — Compile
 
 ```bash
