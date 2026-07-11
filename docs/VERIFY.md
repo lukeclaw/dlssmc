@@ -109,3 +109,40 @@ If `latest.log` is huge, this trims to what matters:
 ```bash
 grep -nE "DLSSmc|Mixin|Vulkan|Exception|ERROR" run/logs/latest.log | head -100
 ```
+
+---
+
+## Committing / git workflow
+
+**On your own machine (Windows/normal):** just use git normally.
+```
+git add -A
+git commit -m "feat(P1-7): ..."
+```
+The `/tmp` workaround below is **only** needed inside a Claude sandbox session, because the
+Cowork folder mount blocks file *deletion*, which breaks an in-place `.git`.
+
+**Inside a Claude sandbox session:**
+1. Git database lives at `/tmp/dlssmc.git`; the work-tree is the mounted folder. Point every
+   git call at both:
+   ```
+   export GIT_DIR=/tmp/dlssmc.git GIT_WORK_TREE=/sessions/<id>/mnt/dlssmc
+   git add -A
+   git commit -m "<type>(<scope>): <summary>"
+   ```
+2. **Export a bundle after each commit** (the `/tmp` git-dir is wiped between sessions):
+   ```
+   git bundle create /tmp/dlssmc-history.bundle --all
+   cp /tmp/dlssmc-history.bundle ./dlssmc-history.bundle
+   ```
+3. **Restore** next session or on your machine: `git clone dlssmc-history.bundle` (delete any
+   broken `.git/` stub first — works on Windows; the mount can't).
+
+**Critical lesson — write committed files via the shell, not only the Write/Edit tools.**
+The mount is eventually-consistent: a file written by the assistant's tools may not have
+propagated when `git commit` reads it, so git can capture a stale/truncated version or a
+stray NUL from an in-place `sed`. For anything committed: author it with a shell heredoc, and
+verify with `git show HEAD:<path>`, brace balance, and `grep -aqP '\x00' <path>` (no NUL).
+
+**Commit message convention:** `type(scope): summary` — type ∈ feat|fix|docs|chore|debug,
+scope = task id/area (e.g. P1-5, build). Body: what changed + why / what was verified.
