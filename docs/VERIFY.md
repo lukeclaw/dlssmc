@@ -192,25 +192,23 @@ Screenshots or a short clip while moving:
 
 ---
 
-## What Claude needs from THIS iteration (M5 / P2-5 iter 2 — MV y-flip fix)
+## What Claude needs from THIS iteration (M5 / P2-5 iter 3 — mvecScale inversion fix)
 
-**Iteration-1 result (2026-07-11): translation artifacts diagnosed as MV y-axis flip**
-(GL NDC y-up buffer vs DLSS image-space y-down). Fix: `mvecScale.y = -renderH` default
-+ live sign knobs `/dlssmc mvx | mvy | jx | jy` (readout prints in chat).
+**Iter-2 result: y-flip alone didn't help — real bug found: mvecScale convention was
+INVERTED** (it *normalizes* MVs into [-1,1], sl_consts.h:203; we sent {renderW,renderH}
+= MVs ~1000× too large; our UV-space buffer is already normalized → unity). Fix:
+mvecScale = {±1, ±1}, signs live-tunable.
 
-1. **Gate B:** `./gradlew build` — paste `BUILD SUCCESSFUL` or the first `error:` block.
-2. **Gate C/D:** run, Vulkan, load a world. Then:
-   - **Strafe + walk forward** over detailed ground — the iter-1 noise swaths should be
-     GONE. If not: `/dlssmc mvy` (back to old sign) to confirm the knob changes anything
-     at all, then try `/dlssmc jy`, `/dlssmc jx`, `/dlssmc mvx` one at a time (say which
-     combo looks best; readout line tells you the current signs).
-   - **Pitch test:** look up/down rapidly. (Y-flip theory predicts this was smeary
-     before the fix — worth one screenshot either way.)
-   - **Deceleration:** release the key after sprinting — the noise burst during the
-     slide should be gone.
-   - Screenshot each + one line, as before.
-3. Still on the list after this: moving-entity ghosting (P1-8 gauge), useAutoExposure,
-   P2-4 reset hooks.
+1. **Gate B:** `.\gradlew.bat build runClient` — paste the first `error:` block if any.
+2. **Gate D:** Vulkan, load a world:
+   - **Walk / strafe / sprint-and-release** over detailed ground — noise swaths and
+     the deceleration burst should be gone or hugely reduced.
+   - **A/B the y sign:** `/dlssmc mvy` toggles (default −1). One of the two should be
+     clearly better while walking — say which readout wins.
+   - **Pitch test:** look up/down fast, both mvy signs — the wrong sign should smear
+     vertically now that magnitudes are sane.
+   - Screenshot each + one line.
+3. Then: moving-entity ghosting (P1-8 gauge), useAutoExposure, P2-4 reset hooks.
 
 ---
 
@@ -257,3 +255,4 @@ verify with `git show HEAD:<path>`, brace balance, and `grep -aqP '\x00' <path>`
 
 **Commit message convention:** `type(scope): summary` — type ∈ feat|fix|docs|chore|debug,
 scope = task id/area (e.g. P1-5, build). Body: what changed + why / what was verified.
+                                                                                                                                                

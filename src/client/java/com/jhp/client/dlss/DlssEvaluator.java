@@ -74,16 +74,30 @@ public final class DlssEvaluator {
     public static volatile boolean enabled = true;
 
     // ---- P2-5 runtime tuning knobs (/dlssmc mvx|mvy|jx|jy) ------------------------------
-    // The velocity buffer stores (prevNdc - currNdc) * 0.5 in GL-style NDC (y-UP);
-    // DLSS consumes pixel-space MVs in image space (y-DOWN), so mvecScale.y defaults to
-    // NEGATIVE. Diagnosed 2026-07-11 from Gate-D screenshots: still + yaw-turn clean,
-    // translation noisy (worst on ground = strongest vertical screen-flow) = y-mirrored
-    // history fetch. x confirmed correct by clean yaw. Toggle live to A/B.
+    // mvecScale is a NORMALIZER into [-1,1] (see fillConstants) — magnitude is unity;
+    // only the SIGNS are tunable. The buffer stores (prevNdc - currNdc) * 0.5 in
+    // GL-style NDC (y-UP); if the consumed space is image-style y-DOWN the y sign must
+    // be negative (current default). Toggle live to A/B.
     public static volatile float mvSignX = 1f;
     public static volatile float mvSignY = -1f;
     /** Sign of the jitterOffset REPORTED to SL (applied matrix jitter unchanged). */
     public static volatile float jitterSignX = 1f;
     public static volatile float jitterSignY = 1f;
+
+    /**
+     * DLSS mode override (/dlssmc mode): -1 = auto by scale (<=0.55 -> MaxPerformance,
+     * else MaxQuality). Exists to decouple the render-scale variable from the DLSS
+     * model variable when diagnosing artifacts (sl_dlss.h DLSSMode values).
+     */
+    public static volatile int modeOverride = -1;
+
+    public static String modeName(int m) {
+        return switch (m) {
+            case 0 -> "Off"; case 1 -> "MaxPerformance"; case 2 -> "Balanced";
+            case 3 -> "MaxQuality"; case 4 -> "UltraPerformance"; case 5 -> "UltraQuality";
+            case 6 -> "DLAA"; default -> "auto";
+        };
+    }
 
     /** Set true after an unrecoverable SL error; falls back to the NEAREST blit. */
     private static boolean broken = false;
@@ -266,7 +280,8 @@ public final class DlssEvaluator {
     }
 
     private static boolean sendOptionsIfNeeded(int outWpx, int outHpx) throws Throwable {
-        int mode = DlssResolution.scale <= 0.55f ? 1 /*eMaxPerformance*/ : 3 /*eMaxQuality*/;
+        int mode = modeOverride >= 0 ? modeOverride
+                : DlssResolution.scale <= 0.55f ? 1 /*eMaxPerformance*/ : 3 /*eMaxQuality*/;
         if (optionsSent && optW == outWpx && optH == outHpx && optMode == mode) {
             return true;
         }
@@ -290,7 +305,7 @@ public final class DlssEvaluator {
             return fail("slDLSSSetOptions -> " + r);
         }
         DLSSmc.LOGGER.info("[DLSSmc] slDLSSSetOptions OK: mode={} output={}x{}",
-                mode == 1 ? "MaxPerformance" : "MaxQuality", outWpx, outHpx);
+                modeName(mode), outWpx, outHpx);
         optionsSent = true;
         optW = outWpx;
         optH = outHpx;
@@ -312,11 +327,16 @@ public final class DlssEvaluator {
 
         c.set(JAVA_FLOAT, 352, jitterSignX * DlssJitter.pixelOffsetX());   // jitterOffset
         c.set(JAVA_FLOAT, 356, jitterSignY * DlssJitter.pixelOffsetY());
-        // Velocity buffer stores UV-space delta (current->previous) in GL NDC (y-up);
-        // mvecScale converts to render-res pixels for NGX (image space, y-down) — hence
-        // the default y NEGATION (mvSignY = -1). Live-tunable: /dlssmc mvx|mvy|jx|jy.
-        c.set(JAVA_FLOAT, 360, mvSignX * renderW);                         // mvecScale.x
-        c.set(JAVA_FLOAT, 364, mvSignY * renderH);                         // mvecScale.y
+        // mvecScale NORMALIZES the MV buffer into [-1,1] where 1.0 = full screen
+        // (sl_consts.h:203; DLSS guide: pixel-space MVs -> {1/renderW, 1/renderH}).
+        // Our buffer stores UV-space deltas (full screen = 1.0) — ALREADY normalized —
+        // so the scale is unity. The original {renderW, renderH} (an inversion of the
+        // convention) fed MVs ~10^3x too large: history rejected at speed (raw low-res
+        // shimmer), wrong-history blends at low speed (deceleration noise swaths) —
+        // M5 iteration-2 diagnosis, 2026-07-11. Signs remain live-tunable
+        // (/dlssmc mvx|mvy); y defaults negative (GL NDC y-up vs image-space y-down).
+        c.set(JAVA_FLOAT, 360, mvSignX);                                   // mvecScale.x
+        c.set(JAVA_FLOAT, 364, mvSignY);                                   // mvecScale.y
         c.set(JAVA_FLOAT, 368, 0f);                                        // cameraPinholeOffset
         c.set(JAVA_FLOAT, 372, 0f);
 

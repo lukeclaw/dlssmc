@@ -58,6 +58,15 @@ public class DLSSmcClient implements ClientModInitializer {
 									"[DLSSmc] render scale: " + DlssResolution.scale));
 							return 1;
 						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mode").executes(ctx -> {
+							// Cycle auto(-1) -> MaxPerformance -> Balanced -> MaxQuality -> DLAA -> auto.
+							DlssEvaluator.modeOverride = switch (DlssEvaluator.modeOverride) {
+								case -1 -> 1; case 1 -> 2; case 2 -> 3; case 3 -> 6; default -> -1;
+							};
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] DLSS mode override: " + DlssEvaluator.modeName(DlssEvaluator.modeOverride)));
+							return 1;
+						}))
 						// P2-5 live tuning knobs: flip a sign, watch the artifacts.
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mvx").executes(ctx -> {
 							DlssEvaluator.mvSignX = -DlssEvaluator.mvSignX;

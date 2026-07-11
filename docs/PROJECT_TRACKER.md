@@ -16,23 +16,24 @@
 > **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
 > directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
-**STATUS (2026-07-11, session 2): M5/P2-5 iteration 1 — MV Y-FLIP diagnosed, fix built,
-AWAITING GATE B/C/D.** Gate-D screenshot analysis: standing still = sharp; yaw turning =
-clean; ANY translation = noise swaths, worst on near ground and persisting through the
-post-keyrelease deceleration slide; far detail flickers while moving. Diagnosis: velocity
-buffer stores (prevNdc−currNdc)·0.5 in GL NDC (**y-up**) but DLSS consumes image-space
-(**y-down**) MVs after mvecScale — ground has the strongest *vertical* screen-flow when
-translating, yaw is pure-x (hence clean, and x sign confirmed correct). FIX:
-`mvecScale.y` now defaults to **−renderH** via new runtime knobs in `DlssEvaluator`
-(`mvSignX/mvSignY/jitterSignX/jitterSignY`), toggled live by **/dlssmc mvx | mvy | jx |
-jy** (knob readout in chat) — one build, in-game A/B. Next Gate D: retest strafe +
-forward-walk (expect fixed); test **pitch** (look up/down fast — y-flip predicts it was
-smeary before the fix); if residue remains, knob order: jy → jx → mvx. Then remaining
-M5: (3) matrix transpose convention, (4) useAutoExposure (try fixed 1.0 exposure tag),
-(5) entity/particle ghosting → P1-8/P1-9. Also pending: P2-4 reset-flag event hooks
-(plumbing exists: DlssJitter.requestReset → Constants.reset), P2-6 license read (human,
-ships gate). Commands: /dlssmc dlss | sl | mv | scale | mvx | mvy | jx | jy.
-Phase 2 architecture notes below remain accurate.**
+**STATUS (2026-07-11, session 2): M5/P2-5 iteration 2 — mvecScale INVERSION fixed,
+AWAITING GATE B/C/D.** Iter 1 (y-flip only) did NOT help — correctly so: real bug found
+in the SDK header. `sl_consts.h:203`: mvecScale **normalizes** MVs into [-1,1]
+(pixel-space MVs → {1/renderW, 1/renderH}, DLSS guide §migration). Our buffer is
+UV-space (full screen = 1.0) — already normalized — but the code sent
+{renderW, renderH}: the convention INVERTED, MVs delivered ~10³× too large. Explains all
+iter-1 Gate-D evidence: still = sharp (MV=0); fast motion (turn/sprint) = history
+rejected → raw low-res shimmer ("far pixels change intensely frame by frame"); SLOW
+translation (deceleration slide) = plausible-but-wrong pixel range → wrong-history
+blends = the noise swaths, worst at low speed; sign toggles no-ops at 10³× magnitude
+error. FIX: mvecScale = {mvSignX, mvSignY} = unity signs only (y still defaults −1 for
+the GL-y-up vs image-y-down question — now actually testable). Knobs /dlssmc mvx | mvy |
+jx | jy remain. Next Gate D: strafe/walk/decelerate (expect fixed or hugely better);
+then A/B mvy both ways; pitch test; then remaining M5: matrix transpose convention,
+useAutoExposure (fixed 1.0 exposure tag), entity/particle ghosting → P1-8/P1-9. Also
+pending: P2-4 reset-flag event hooks, P2-6 license read (human, ships gate). Commands:
+/dlssmc dlss | sl | mv | scale | mvx | mvy | jx | jy. Phase 2 architecture notes below
+remain accurate.**
 `SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
 `VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's
 creation proxies (P2-1 collapsed into P2-2 as planned — SL adds extensions/features/
@@ -165,4 +166,4 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-10 | Pin `26.3-snapshot-3`; bump deliberately. | Vulkan internals change weekly (PRD §7). |
 | 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a clean Vulkan path. |
 | 2026-07-11 | P2-1 collapsed into P2-2 via SL creation proxies; swapchain/present hooks skipped. | ManualHooking guide §4.2: proxies add required extensions/features/queues; sl_hooks.h swapchain hooks only matter for Frame Generation (out of scope). |
-| 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempotent for backend restarts. |
+| 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempo
