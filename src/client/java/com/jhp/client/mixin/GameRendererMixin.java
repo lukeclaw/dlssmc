@@ -4,6 +4,7 @@ import com.jhp.client.dlss.DlssJitter;
 import com.jhp.client.dlss.DlssDebug;
 import com.jhp.client.dlss.DlssMotion;
 import com.jhp.client.dlss.DlssResolution;
+import com.jhp.client.dlss.DlssVelocity;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import net.minecraft.client.renderer.GameRenderer;
@@ -63,6 +64,11 @@ public abstract class GameRendererMixin {
     @Inject(method = "renderLevel", at = @At("RETURN"), require = 1)
     private void dlssmc$onRenderLevelReturn(CallbackInfo ci) {
         DlssJitter.endLevelFrame();
+        // P1-7 slice 1: fill the velocity target at the internal (DLSS input) resolution.
+        // During decoupling mainRenderTarget is still the low-res level target here.
+        if (DlssVelocity.enabled && this.mainRenderTarget != null) {
+            DlssVelocity.render(this.mainRenderTarget.width, this.mainRenderTarget.height);
+        }
         if (this.dlssmc$savedTarget != null) {
             RenderTarget real = this.dlssmc$savedTarget;
             TextureTarget level = DlssResolution.levelTarget();
@@ -73,6 +79,12 @@ public abstract class GameRendererMixin {
             }
             this.mainRenderTarget = real;
             this.dlssmc$savedTarget = null;
+        }
+        // Debug overlay (/dlssmc mv): composite scene + velocity onto the NATIVE target
+        // (after restore). Needs the level target as the scene source, so it requires
+        // resolution decoupling to be active.
+        if (DlssVelocity.enabled && DlssVelocity.showDebug && DlssResolution.enabled()) {
+            DlssVelocity.blitDebug(DlssResolution.levelTarget(), this.mainRenderTarget);
         }
     }
 

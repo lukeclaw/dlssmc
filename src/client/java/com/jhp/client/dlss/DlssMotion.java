@@ -25,6 +25,18 @@ public final class DlssMotion {
 
     private static final Matrix4f curViewProj = new Matrix4f();
     private static final Matrix4f prevViewProj = new Matrix4f();
+    /** inverse(curViewProj), recomputed once per frame for the GPU velocity pass. */
+    private static final Matrix4f curInvViewProj = new Matrix4f();
+    /** prevViewProj · translate(camDelta) — camera delta folded in. */
+    private static final Matrix4f prevViewProjTranslated = new Matrix4f();
+    /**
+     * Full reprojection in ONE matrix: prevViewProj · T(camDelta) · inverse(curViewProj).
+     * Valid because perspective division is invariant under homogeneous scaling, so the
+     * intermediate divide by rel.w cancels; prevNdc = project(reprojection · curClip).
+     * One mat4 lets the GPU pass reuse ProjectionMatrixBuffer + the stock PROJECTION
+     * bind-group layout (no custom UBO).
+     */
+    private static final Matrix4f reprojection = new Matrix4f();
     private static double curCamX, curCamY, curCamZ;
     private static double prevCamX, prevCamY, prevCamZ;
     private static boolean primed = false;
@@ -44,12 +56,22 @@ public final class DlssMotion {
             prevCamX = curCamX; prevCamY = curCamY; prevCamZ = curCamZ;
             primed = true;
         }
+
+        // Derived matrices for the GPU velocity pass (DlssVelocity):
+        // prevRel = rel + camDelta  =>  prevClip = prevVP * T(camDelta) * rel.
+        curInvViewProj.set(curViewProj).invert();
+        prevViewProjTranslated.set(prevViewProj).translate(camDeltaX(), camDeltaY(), camDeltaZ());
+        reprojection.set(prevViewProjTranslated).mul(curInvViewProj);
+
         frame++;
         debugSanityCheck();
     }
 
     public static Matrix4f currentViewProj() { return curViewProj; }
     public static Matrix4f previousViewProj() { return prevViewProj; }
+    public static Matrix4f currentViewProjInverse() { return curInvViewProj; }
+    public static Matrix4f previousViewProjTranslated() { return prevViewProjTranslated; }
+    public static Matrix4f reprojectionMatrix() { return reprojection; }
     public static float camDeltaX() { return (float) (curCamX - prevCamX); }
     public static float camDeltaY() { return (float) (curCamY - prevCamY); }
     public static float camDeltaZ() { return (float) (curCamZ - prevCamZ); }

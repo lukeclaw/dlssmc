@@ -2,8 +2,13 @@ package com.jhp.client;
 
 import com.jhp.DLSSmc;
 import com.jhp.client.dlss.DlssRenderState;
+import com.jhp.client.dlss.DlssResolution;
+import com.jhp.client.dlss.DlssVelocity;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.minecraft.network.chat.Component;
 
 public class DLSSmcClient implements ClientModInitializer {
 
@@ -16,11 +21,24 @@ public class DLSSmcClient implements ClientModInitializer {
 				"[DLSSmc] client init - awaiting Vulkan device capture (deviceReady={})",
 				DlssRenderState.isDeviceReady());
 
-		// Render scale is controlled by DlssResolution.scale (default 0.5).
-		// TODO(keybind): the Fabric key-mapping API package changed in this version
-		// (fabric-key-mapping-api-v1). To wire F8 -> DlssResolution.cycleScale(), find the
-		// current KeyBindingHelper package in the resolved fabric-api and register a
-		// KeyMapping("key.dlssmc.cycle_scale", GLFW_KEY_F8, KeyMapping.Category.MISC),
-		// polling it in a ClientTickEvents.END_CLIENT_TICK handler.
+		// Debug/settings toggles. A chat command avoids the key-mapping API package
+		// churn in this snapshot (see the old F8 TODO); a real Video Settings entry can
+		// come later if the prototype ships.
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+				dispatcher.register(ClientCommandManager.literal("dlssmc")
+						.then(ClientCommandManager.literal("mv").executes(ctx -> {
+							DlssVelocity.showDebug = !DlssVelocity.showDebug;
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] motion-vector overlay: " + (DlssVelocity.showDebug ? "ON" : "OFF")
+									+ (DlssVelocity.showDebug && !DlssResolution.enabled()
+											? " (needs render scale < 1.0 to display)" : "")));
+							return 1;
+						}))
+						.then(ClientCommandManager.literal("scale").executes(ctx -> {
+							DlssResolution.cycleScale();
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] render scale: " + DlssResolution.scale));
+							return 1;
+						}))));
 	}
 }
