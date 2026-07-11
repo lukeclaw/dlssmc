@@ -64,6 +64,8 @@ public final class SlBridge {
 
     private static final long FLAG_DISABLE_CL_STATE_TRACKING = 1L;      // 1 << 0
     private static final long FLAG_USE_MANUAL_HOOKING = 4L;             // 1 << 2
+    /** Required for the slSetTagForFrame API (sl.cpp rejects it with eErrorInvalidIntegration otherwise). */
+    private static final long FLAG_USE_FRAME_BASED_RESOURCE_TAGGING = 128L; // 1 << 7
 
     private enum State { UNINITIALIZED, ACTIVE, FAILED }
 
@@ -76,6 +78,13 @@ public final class SlBridge {
     private static MethodHandle hVkCreateInstance;
     private static MethodHandle hVkCreateDevice;
     private static MethodHandle hVkEnumeratePhysicalDevices;
+    // P2-3 per-frame API
+    private static MethodHandle hSlGetNewFrameToken;
+    private static MethodHandle hSlSetConstants;
+    private static MethodHandle hSlSetTagForFrame;
+    private static MethodHandle hSlEvaluateFeature;
+    private static MethodHandle hSlGetFeatureFunction;
+    private static MethodHandle hDlssSetOptions; // resolved lazily via slGetFeatureFunction
 
     /**
      * True once the VkInstance was actually created through SL's proxy. The whole proxied
@@ -153,6 +162,17 @@ public final class SlBridge {
                     FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
             hVkEnumeratePhysicalDevices = linker.downcallHandle(find(sl, "vkEnumeratePhysicalDevices"),
                     FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS));
+            // Per-frame API (P2-3). C++ references are pointers at the ABI level.
+            hSlGetNewFrameToken = linker.downcallHandle(find(sl, "slGetNewFrameToken"),
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));           // (FrameToken*&, const uint32_t*)
+            hSlSetConstants = linker.downcallHandle(find(sl, "slSetConstants"),
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS));  // (Constants&, FrameToken&, ViewportHandle&)
+            hSlSetTagForFrame = linker.downcallHandle(find(sl, "slSetTagForFrame"),
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_INT, ADDRESS)); // (token, viewport, ResourceTag*, num, CommandBuffer*)
+            hSlEvaluateFeature = linker.downcallHandle(find(sl, "slEvaluateFeature"),
+                    FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, ADDRESS, JAVA_INT, ADDRESS)); // (feature, token, BaseStructure**, num, cmdBuf)
+            hSlGetFeatureFunction = linker.downcallHandle(find(sl, "slGetFeatureFunction"),
+                    FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, ADDRESS)); // (feature, const char*, void*&)
 
             MemorySegment prefs = buildPreferences(arena, slDir);
             int r = (int) hSlInit.invokeExact(prefs, SDK_VERSION);
@@ -237,6 +257,61 @@ public final class SlBridge {
         }
     }
 
+    // ---- P2-3 per-frame wrappers -------------------------------------------------------
+
+    /** Returns FrameToken* (native address) or 0 on failure. SL owns the token memory. */
+    public static long getNewFrameToken() throws Throwable {
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment pToken = a.allocate(ADDRESS);
+            int r = (int) hSlGetNewFrameToken.invokeExact(pToken, MemorySegment.NULL);
+            return r == SL_OK ? pToken.get(JAVA_LONG, 0) : 0L;
+        }
+    }
+
+    public static int setConstants(MemorySegment constants, long frameToken, MemorySegment viewport)
+            throws Throwable {
+        MemorySegment token = MemorySegment.ofAddress(frameToken);
+        return (int) hSlSetConstants.invokeExact(constants, token, viewport);
+    }
+
+    /** tags = contiguous array of ResourceTag structs (64 B stride). */
+    public static int setTagForFrame(long frameToken, MemorySegment viewport, MemorySegment tags,
+            int numTags, long vkCommandBuffer) throws Throwable {
+        MemorySegment token = MemorySegment.ofAddress(frameToken);
+        MemorySegment cb = MemorySegment.ofAddress(vkCommandBuffer);
+        return (int) hSlSetTagForFrame.invokeExact(token, viewport, tags, numTags, cb);
+    }
+
+    /** inputs = BaseStructure** (array of struct pointers; at minimum the ViewportHandle). */
+    public static int evaluateDlss(long frameToken, MemorySegment inputs, int numInputs,
+            long vkCommandBuffer) throws Throwable {
+        MemorySegment token = MemorySegment.ofAddress(frameToken);
+        MemorySegment cb = MemorySegment.ofAddress(vkCommandBuffer);
+        return (int) hSlEvaluateFeature.invokeExact(K_FEATURE_DLSS, token, inputs, numInputs, cb);
+    }
+
+    /**
+     * slDLSSSetOptions via slGetFeatureFunction — only callable after the device exists
+     * (sl.h: feature functions require slSetD3DDevice/slSetVulkanInfo/creation proxies).
+     */
+    public static int dlssSetOptions(MemorySegment viewport, MemorySegment options) throws Throwable {
+        if (hDlssSetOptions == null) {
+            try (Arena a = Arena.ofConfined()) {
+                MemorySegment name = a.allocateFrom("slDLSSSetOptions");
+                MemorySegment pFn = a.allocate(ADDRESS);
+                int r = (int) hSlGetFeatureFunction.invokeExact(K_FEATURE_DLSS, name, pFn);
+                if (r != SL_OK) {
+                    DLSSmc.LOGGER.error("[DLSSmc] slGetFeatureFunction(slDLSSSetOptions) -> sl::Result={}", r);
+                    return r;
+                }
+                hDlssSetOptions = Linker.nativeLinker().downcallHandle(
+                        MemorySegment.ofAddress(pFn.get(JAVA_LONG, 0)),
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS)); // (ViewportHandle&, DLSSOptions&)
+            }
+        }
+        return (int) hDlssSetOptions.invokeExact(viewport, options);
+    }
+
     // ------------------------------------------------------------------------------------
 
     private static void fail(String why) {
@@ -305,7 +380,8 @@ public final class SlBridge {
         prefs.set(ADDRESS, 64, MemorySegment.NULL);               // allocateCallback
         prefs.set(ADDRESS, 72, MemorySegment.NULL);               // releaseCallback
         prefs.set(ADDRESS, 80, logStub);                          // logMessageCallback
-        prefs.set(JAVA_LONG, 88, FLAG_DISABLE_CL_STATE_TRACKING | FLAG_USE_MANUAL_HOOKING);
+        prefs.set(JAVA_LONG, 88, FLAG_DISABLE_CL_STATE_TRACKING | FLAG_USE_MANUAL_HOOKING
+                | FLAG_USE_FRAME_BASED_RESOURCE_TAGGING);
         prefs.set(ADDRESS, 96, features);                         // featuresToLoad = {kFeatureDLSS}
         prefs.set(JAVA_INT, 104, 1);                              // numFeaturesToLoad
         prefs.set(JAVA_INT, 108, 0);                              // applicationId (using projectId instead)

@@ -36,6 +36,9 @@ public final class DlssMotion {
      * bind-group layout (no custom UBO).
      */
     private static final Matrix4f reprojection = new Matrix4f();
+    /** Unjittered projection + view rotation kept separately for the SL Constants (P2-3). */
+    private static final Matrix4f curProj = new Matrix4f();
+    private static final Matrix4f curViewRot = new Matrix4f();
     private static double curCamX, curCamY, curCamZ;
     private static double prevCamX, prevCamY, prevCamZ;
     private static boolean primed = false;
@@ -47,6 +50,8 @@ public final class DlssMotion {
         prevCamX = curCamX; prevCamY = curCamY; prevCamZ = curCamZ;
 
         // clip = projection * viewRotation, applied to (worldPos - cameraPos).
+        curProj.set(camera.projectionMatrix);
+        curViewRot.set(camera.viewRotationMatrix);
         curViewProj.set(camera.projectionMatrix).mul(camera.viewRotationMatrix);
         curCamX = camera.pos.x; curCamY = camera.pos.y; curCamZ = camera.pos.z;
 
@@ -66,6 +71,11 @@ public final class DlssMotion {
         debugSanityCheck();
     }
 
+    public static Matrix4f currentProjection() { return curProj; }
+    public static Matrix4f currentViewRotation() { return curViewRot; }
+    public static double cameraX() { return curCamX; }
+    public static double cameraY() { return curCamY; }
+    public static double cameraZ() { return curCamZ; }
     public static Matrix4f currentViewProj() { return curViewProj; }
     public static Matrix4f previousViewProj() { return prevViewProj; }
     public static Matrix4f currentViewProjInverse() { return curInvViewProj; }

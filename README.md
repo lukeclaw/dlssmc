@@ -9,16 +9,24 @@ Mixin. Targets `26.3-snapshot-3`.
 
 ## Status
 
-Rendering foundation is built and runtime-verified on real hardware (NVIDIA / Vulkan 1.4):
+**DLSS IS LIVE** (2026-07-11): DLSS Super Resolution upscales the world in-game —
+1280x685 → 2560x1369 (MaxPerformance) verified on an RTX 4070 SUPER, driver 596.49,
+Vulkan 1.4. Current phase: M5 quality tuning (ghosting/artifact iteration).
 
-- Vulkan device + queue capture (for Streamline manual hooking)
+All layers runtime-verified on real hardware:
+
+- Vulkan device + queue capture; Streamline v2.12.0 hooked via its manual-hooking
+  creation proxies (`SlBridge`, a Java 25 FFM binding of `sl.interposer.dll` — no JNI)
 - Sub-pixel projection jitter on the world (Halton 2,3)
-- Resolution decoupling — 3D world renders at reduced internal res and upscales to
-  native, HUD stays crisp (render scale via `DlssResolution.scale`, default 0.5)
-- Custom renderpearl shader pipeline
-- Motion vectors: DONE — exact per-pixel terrain MVs (draw-replay prepass) + camera
-  fallback for sky/entities; verify in-game with the `/dlssmc mv` overlay
-- NVIDIA Streamline / DLSS wiring: Phase 2 — NEXT (SDK v2.12.0 in repo root, gitignored)
+- Resolution decoupling — world renders at reduced internal res; DLSS outputs into a
+  dedicated STORAGE image copied to the native target; hand + HUD render at native res
+- Motion vectors — exact per-pixel terrain MVs (draw-replay prepass) + camera fallback
+  for sky/entities (`/dlssmc mv` overlay)
+- Per-frame SL plumbing — constants, frame-based resource tags, `slEvaluateFeature`
+  replacing the old NEAREST upscale blit; automatic fallback to the blit if SL fails
+
+In-game commands: `/dlssmc dlss` (toggle/status), `/dlssmc sl` (Streamline status),
+`/dlssmc mv` (MV overlay), `/dlssmc scale` (render scale).
 
 See **docs/PROJECT_TRACKER.md** (live status), **docs/IMPLEMENTATION_GUIDE.md** (resumable
 spec), **docs/SPIKE_FINDINGS.md** (research), and **docs/VERIFY.md** (build/test loop).

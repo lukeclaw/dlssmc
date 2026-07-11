@@ -40,7 +40,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * internal render resolution.
  */
 @Mixin(GameRenderer.class)
-public abstract class GameRendererMixin {
+public abstract class GameRendererMixin implements com.jhp.client.dlss.DlssTargetAccess {
 
     @Mutable
     @Shadow @Final
@@ -48,6 +48,24 @@ public abstract class GameRendererMixin {
 
     @Unique
     private RenderTarget dlssmc$savedTarget;
+
+    @Override
+    public RenderTarget dlssmc$savedNativeTarget() {
+        return this.dlssmc$savedTarget;
+    }
+
+    /**
+     * P2-3 early restore: called from LevelRendererMixin right after a successful DLSS
+     * evaluate, so hand+HUD render at native res over the DLSS output. Nulling the saved
+     * target also skips the legacy NEAREST blit in dlssmc$onRenderLevelReturn.
+     */
+    @Override
+    public void dlssmc$restoreNativeTarget() {
+        if (this.dlssmc$savedTarget != null) {
+            this.mainRenderTarget = this.dlssmc$savedTarget;
+            this.dlssmc$savedTarget = null;
+        }
+    }
 
     @Shadow @Final
     private GameRenderState gameRenderState;

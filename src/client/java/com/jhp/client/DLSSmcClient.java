@@ -3,6 +3,7 @@ package com.jhp.client;
 import com.jhp.DLSSmc;
 import com.jhp.client.dlss.DlssRenderState;
 import com.jhp.client.dlss.DlssResolution;
+import com.jhp.client.dlss.DlssEvaluator;
 import com.jhp.client.dlss.DlssVelocity;
 import com.jhp.client.dlss.SlBridge;
 
@@ -35,6 +36,15 @@ public class DLSSmcClient implements ClientModInitializer {
 									"[DLSSmc] motion-vector overlay: " + (DlssVelocity.showDebug ? "ON" : "OFF")
 									+ (DlssVelocity.showDebug && !DlssResolution.enabled()
 											? " (needs render scale < 1.0 to display)" : "")));
+							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("dlss").executes(ctx -> {
+							DlssEvaluator.enabled = !DlssEvaluator.enabled;
+							if (DlssEvaluator.enabled) {
+								DlssEvaluator.reset(); // clear a previous 'broken' latch and retry
+							}
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] DLSS evaluate: " + DlssEvaluator.status()));
 							return 1;
 						}))
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("sl").executes(ctx -> {

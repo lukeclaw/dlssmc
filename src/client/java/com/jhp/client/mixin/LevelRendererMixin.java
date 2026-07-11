@@ -1,5 +1,8 @@
 package com.jhp.client.mixin;
 
+import com.jhp.client.dlss.DlssEvaluator;
+import com.jhp.client.dlss.DlssResolution;
+import com.jhp.client.dlss.DlssTargetAccess;
 import com.jhp.client.dlss.DlssTerrainVelocity;
 import com.jhp.client.dlss.DlssVelocity;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -53,5 +56,16 @@ public abstract class LevelRendererMixin {
         }
         DlssVelocity.render(target.width, target.height);
         DlssTerrainVelocity.renderPrepass(DlssVelocity.velocityTarget(), target);
+
+        // P2-3: DLSS evaluate — records upscale of the low-res level target into the
+        // native target HERE (depth still intact; velocity targets just written). On
+        // success the main target is restored EARLY so hand+HUD render at native res
+        // on top; the legacy NEAREST blit in GameRendererMixin is skipped automatically.
+        if (Minecraft.getInstance().gameRenderer instanceof DlssTargetAccess access
+                && access.dlssmc$savedNativeTarget() != null) {
+            if (DlssEvaluator.evaluate(DlssResolution.levelTarget(), access.dlssmc$savedNativeTarget())) {
+                access.dlssmc$restoreNativeTarget();
+            }
+        }
     }
 }

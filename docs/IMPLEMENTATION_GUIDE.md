@@ -122,24 +122,35 @@ against `DlssMotion`'s CPU values; (5) feed to DLSS in Phase 2.
   `createRenderPass` accepts multiple color attachments.
 - **Slice 3 — entities (P1-8):** previous-frame model transforms; after slice 2 works.
 
-## 4. DLSS wiring (Phase 2)
+## 4. DLSS wiring (Phase 2) — DONE 2026-07-11, as-built
 
-1. **Download** the NVIDIA Streamline SDK (registration) and **read the EULA** (Risk 3 /
-   P2-6) — shipping gate.
-2. **Inject VK device/instance extensions + features** DLSS/NGX need *before*
-   `vkCreateDevice`. Targets: `backend.vulkan.VulkanBackend` (`createDevice`/`vkCreateDevice`),
-   `VulkanInstance`, `init.{FeatureSet, VulkanFeature, VulkanPNextStruct}`. In manual-hook mode
-   SL does **not** add these for us.
-3. **Manual hook** Streamline against Minecraft's device: `slSetVulkanInfo` (mandatory when
-   the app owns `vkCreateInstance`/`vkCreateDevice`), `slGetNativeInterface`/`slUpgradeInterface`.
-   Pass the captured `VkDevice`/`VkQueue`/physical device via `DlssRenderState`. Native glue
-   via Java FFM (Project Panama) or a small JNI shim.
-4. **Tag per-frame buffers** into SL `sl::Constants` / DLSS tags: low-res color = the
-   `DlssResolution` level target; output = native `mainRenderTarget`; depth; motion vectors
-   (§3); jitter offset = `DlssJitter.pixelOffsetX/Y()`; exposure/HDR flags. Replace the
-   NEAREST upscale blit at `renderLevel` RETURN with the DLSS evaluate call.
-5. **Reset flag** on camera cuts — `DlssJitter.requestReset()` is already wired; call it from
-   teleport/portal/respawn/dimension-change events, consume via `DlssJitter.consumeReset()`.
+How it actually shipped (differs from the original plan in ways worth knowing):
+
+1. **EULA read (P2-6) still pending** — shipping gate, human task.
+2. ~~Manual extension/feature injection~~ NOT needed: SL's **creation proxies**
+   (`vkCreateInstance`/`vkCreateDevice` exports of `sl.interposer.dll`) add every
+   extension/feature/queue themselves. `slSetVulkanInfo` also not needed with proxies.
+3. **`SlBridge`** (pure Java 25 FFM, no JNI): loads the interposer, `slInit` (flags:
+   manual hooking + **eUseFrameBasedResourceTagging** — mandatory for slSetTagForFrame),
+   redirects Mojang's `vkCreateInstance` / `vkEnumeratePhysicalDevices` /
+   `vkCreateDevice` through SL. CRITICAL: every SL-intercepted entry point Mojang calls
+   must be routed (skipping enumeration caused a pc=0 native crash — SL's
+   instanceDeviceMap stays empty). All-or-nothing chain guard (`isInstanceProxied`,
+   `markChainBroken`).
+4. **`DlssEvaluator`** records per frame at `LevelRenderer.render` RETURN (depth intact):
+   token → `slSetConstants` (`clipToPrevClip` = `DlssMotion.reprojectionMatrix()`;
+   REVERSE-Z `depthInverted`; UV-space MVs with `mvecScale={renderW,renderH}`) →
+   `slSetTagForFrame` (level depth/color, velocity RG16F, output) →
+   `slEvaluateFeature` → `vkCmdCopyImage` into the native color. Output image is a raw
+   LWJGL-created RGBA8 **STORAGE** VkImage (renderpearl's usage enum has no storage
+   bit). All renderpearl images live permanently in `VK_IMAGE_LAYOUT_GENERAL`.
+   Transient command buffer via public `VulkanCommandEncoder`
+   (`allocateAndBeginTransientCommandBuffer`/`execute` — execute closes Mojang's open
+   buffer, ordering exact). On success the main target restores EARLY (duck interface
+   `DlssTargetAccess`) → hand+HUD at native res; on failure, latched fallback to the
+   NEAREST blit.
+5. **Reset flag** — `DlssJitter.requestReset()` feeds `Constants.reset`; still needs the
+   teleport/portal/respawn/dimension-change event hooks (P2-4).
 
 ## 5. File map
 
@@ -158,20 +169,29 @@ src/client/java/com/jhp/client/
   mixin/LevelRendererMixin.java captures ChunkSectionsToRender + uniforms at executeSolid;
                                runs both velocity passes at render RETURN (pre depth-clear)
   dlss/DlssDebug.java          custom-pipeline helper (proven); depth/plumbing debug pass
+  dlss/SlBridge.java           P2: FFM binding of sl.interposer.dll (slInit, proxies,
+                               per-frame API); documents the full SL struct ABI
+  dlss/DlssEvaluator.java      P2-3: per-frame constants/tags/evaluate + STORAGE output
+                               image + copy-to-native; NEAREST-blit fallback latch
+  dlss/DlssTargetAccess.java   duck interface for the early main-target restore
   mixin/VulkanDeviceMixin.java capture handles at VulkanDevice.<init> TAIL (require=1)
+  mixin/VulkanInstanceMixin.java P2: vkCreateInstance -> SL proxy (lazy slInit)
+  mixin/VulkanBackendMixin.java P2: vkEnumeratePhysicalDevices + vkCreateDevice -> SL proxies
   mixin/GameRendererMixin.java jitter @ModifyArg + resolution swap + MV capture on renderLevel
   mixin/ProjectionMixin.java   RETIRED (HUD-only; not in mixins.json)
 src/client/resources/assets/dlssmc/shaders/core/dlss_depth_debug.fsh
 src/client/resources/assets/dlssmc/shaders/core/dlss_velocity.fsh
 src/client/resources/assets/dlssmc/shaders/core/dlss_velocity_debug.fsh
+src/client/resources/assets/dlssmc/shaders/core/terrain_velocity.vsh/.fsh
 ```
 
 ## 6. Gotchas for future sessions
 
-- **Git DB lives in the sandbox `/tmp`**, exported to `dlssmc-history.bundle` (the Cowork
-  mount blocks file deletion, breaking an in-place `.git`). Restore via
-  `git clone dlssmc-history.bundle`. A non-functional `.git/` stub may sit in the folder —
-  delete it on a real machine.
+- **Git is normal again**: real `.git` in the folder + private remote
+  (github.com/lukeclaw/dlssmc). The old `/tmp`-git-dir + bundle workflow is retired;
+  `dlssmc-history.bundle` is a historical artifact. Claude sessions should NOT run
+  mutating git commands through the sandbox mount (stale index/locks) — the human
+  commits on Windows.
 - **Pin the snapshot.** Re-run Gate A (`javap`) after any version bump; renderpearl internals
   shift. All mixin descriptors are javap-confirmed for `26.3-snapshot-3` only.
 - **Dev-world saves corrupt** if `runClient` is force-killed (`EOFException` on load) — make a
