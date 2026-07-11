@@ -5,9 +5,11 @@ import com.jhp.client.dlss.DlssRenderState;
 import com.jhp.client.dlss.DlssResolution;
 import com.jhp.client.dlss.DlssVelocity;
 
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.network.chat.Component;
 
 public class DLSSmcClient implements ClientModInitializer {
@@ -21,12 +23,12 @@ public class DLSSmcClient implements ClientModInitializer {
 				"[DLSSmc] client init - awaiting Vulkan device capture (deviceReady={})",
 				DlssRenderState.isDeviceReady());
 
-		// Debug/settings toggles. A chat command avoids the key-mapping API package
-		// churn in this snapshot (see the old F8 TODO); a real Video Settings entry can
-		// come later if the prototype ships.
+		// Debug/settings toggles. This Fabric API build has no ClientCommandManager
+		// sugar class, so the brigadier literals are built directly. A real Video
+		// Settings entry can come later if the prototype ships.
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-				dispatcher.register(ClientCommandManager.literal("dlssmc")
-						.then(ClientCommandManager.literal("mv").executes(ctx -> {
+				dispatcher.register(LiteralArgumentBuilder.<FabricClientCommandSource>literal("dlssmc")
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mv").executes(ctx -> {
 							DlssVelocity.showDebug = !DlssVelocity.showDebug;
 							ctx.getSource().sendFeedback(Component.literal(
 									"[DLSSmc] motion-vector overlay: " + (DlssVelocity.showDebug ? "ON" : "OFF")
@@ -34,7 +36,7 @@ public class DLSSmcClient implements ClientModInitializer {
 											? " (needs render scale < 1.0 to display)" : "")));
 							return 1;
 						}))
-						.then(ClientCommandManager.literal("scale").executes(ctx -> {
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("scale").executes(ctx -> {
 							DlssResolution.cycleScale();
 							ctx.getSource().sendFeedback(Component.literal(
 									"[DLSSmc] render scale: " + DlssResolution.scale));
