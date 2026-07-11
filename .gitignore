@@ -56,3 +56,6 @@ docs/javap_dump.txt
 
 # extracted vanilla shader sources (Mojang assets, reference only)
 /assets/
+
+# NVIDIA Streamline SDK (NVIDIA license — never commit)
+/streamline-sdk-*/
