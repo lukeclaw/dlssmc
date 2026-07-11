@@ -29,11 +29,14 @@
 - **M2 DONE (S3 confirmed):** half-res world upscales to native, HUD crisp. P1-6 also
   satisfied (HUD native by construction). We now have all the *rendering* pieces DLSS
   needs except motion vectors.
-- **CONSOLIDATED (2026-07-10).** Decision: stop at a proven foundation before the
-  multi-week MV/DLSS-native grind. Added F8 render-scale keybind; wrote
-  `IMPLEMENTATION_GUIDE.md` (resumable spec for MV approaches A/B + DLSS wiring) and a real
-  README. Everything that works is `require=1`, verified, and committed. To resume: read
-  `docs/IMPLEMENTATION_GUIDE.md` → §3 (motion vectors) or §4 (DLSS).
+- **CONSOLIDATED (2026-07-10) — BUILD SUCCESSFUL, all working features verified.** Decision:
+  stop at a proven foundation before the multi-week MV/DLSS-native grind. Wrote
+  `IMPLEMENTATION_GUIDE.md` (resumable spec for MV approaches A/B + DLSS wiring) + real
+  README. Everything that works is `require=1`, runtime-verified, committed.
+  Note: F8 render-scale keybind was **deferred** — the fabric key-mapping API package
+  changed in this version; render scale is set via `DlssResolution.scale` (default 0.5),
+  and `cycleScale()` + a code TODO are in place for wiring the keybind later.
+  To resume: read `docs/IMPLEMENTATION_GUIDE.md` → §3 (motion vectors) or §4 (DLSS).
 - **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
   Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
   cannot be done in this sandbox).
