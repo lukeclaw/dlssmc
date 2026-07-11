@@ -16,8 +16,9 @@ Rendering foundation is built and runtime-verified on real hardware (NVIDIA / Vu
 - Resolution decoupling — 3D world renders at reduced internal res and upscales to
   native, HUD stays crisp (render scale via `DlssResolution.scale`, default 0.5)
 - Custom renderpearl shader pipeline
-- Motion vectors: math done; GPU pass pending (see the guide)
-- NVIDIA Streamline / DLSS wiring: Phase 2 (pending)
+- Motion vectors: DONE — exact per-pixel terrain MVs (draw-replay prepass) + camera
+  fallback for sky/entities; verify in-game with the `/dlssmc mv` overlay
+- NVIDIA Streamline / DLSS wiring: Phase 2 — NEXT (SDK v2.12.0 in repo root, gitignored)
 
 See **docs/PROJECT_TRACKER.md** (live status), **docs/IMPLEMENTATION_GUIDE.md** (resumable
 spec), **docs/SPIKE_FINDINGS.md** (research), and **docs/VERIFY.md** (build/test loop).

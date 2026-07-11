@@ -49,7 +49,20 @@ Everything above is `require = 1` and green. `DlssDebug.showDepth` is off.
   UBO write pattern: `device.createBuffer(...)` + `Std140Builder.onStack(...).putMat4f(...)` +
   `createCommandEncoder().writeToBuffer(slice, byteBuffer)` (see `ProjectionMatrixBuffer`).
 
-## 3. Motion vectors (P1-7) — two viable approaches
+## 3. Motion vectors (P1-7) — ✅ DONE (2026-07-10, runtime-verified)
+
+**Final architecture** (supersedes the plan below, kept for context): two layers into
+one RG16F target at internal res, both at `LevelRenderer.render` RETURN (CRITICAL — the
+level depth is CLEARED for renderItemInHand before renderLevel returns):
+(1) fullscreen camera fallback (`DlssVelocity`, single folded reprojection matrix via
+ProjectionMatrixBuffer + PROJECTION layout, assumed depth 0.0002 reverse-Z);
+(2) terrain prepass (`DlssTerrainVelocity` + `LevelRendererMixin`): replays
+`ChunkSectionsToRender` OPAQUE draws with a TERRAIN_SNIPPET-derived pipeline
+(`terrain_velocity.vsh/.fsh`, DlssReprojection UBO, uniforms SNAPSHOTTED at
+executeSolid), level depth GEQUAL/no-write/+2-bias. `/dlssmc mv` overlays it
+(alpha-blend over backbuffer, log-scaled). Entities = P1-8 (deferred post-DLSS).
+
+### Original analysis (historical)
 
 The math (`DlssMotion`) is done: `clip = proj·viewRot·(worldPos − cameraPos)`; store the
 unjittered current/previous view-proj + camera position; MV = prevNDC − currNDC. What's
@@ -138,8 +151,12 @@ src/client/java/com/jhp/client/
   dlss/DlssResolution.java     low-res level TextureTarget + mainRenderTarget swap; scale cycle
   dlss/DlssMotion.java         unjittered view-proj + camera history; CPU reprojection check;
                                exports inverse + delta-folded matrices for the GPU UBO
-  dlss/DlssVelocity.java       P1-7 slice 1: RG16F velocity target + reprojection UBO +
-                               fullscreen camera-velocity pass + Gate-D debug overlay
+  dlss/DlssVelocity.java       P1-7: RG16F velocity target + fullscreen camera fallback
+                               (single reprojection matrix) + /dlssmc mv overlay
+  dlss/DlssTerrainVelocity.java P1-7: terrain velocity prepass (replays chunk draws,
+                               snapshotted uniforms, depth-tested GEQUAL/no-write)
+  mixin/LevelRendererMixin.java captures ChunkSectionsToRender + uniforms at executeSolid;
+                               runs both velocity passes at render RETURN (pre depth-clear)
   dlss/DlssDebug.java          custom-pipeline helper (proven); depth/plumbing debug pass
   mixin/VulkanDeviceMixin.java capture handles at VulkanDevice.<init> TAIL (require=1)
   mixin/GameRendererMixin.java jitter @ModifyArg + resolution swap + MV capture on renderLevel

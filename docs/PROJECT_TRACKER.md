@@ -12,98 +12,48 @@
 
 ## ▶ RESUME HERE (where we left off)
 
-> **To verify/help this iteration, follow [`VERIFY.md`](./VERIFY.md).** Start with Gate A (the `javap` dumps).
+> **Verify loop:** [`VERIFY.md`](./VERIFY.md) — but note: javap Gates A/A2/A3/A4 are
+> **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
+> directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
-- **Done:** Risk spikes 1/1b/2/3 complete (see findings). PRD + tracker written. Git
-  baseline established. Phase-1 Vulkan handle-capture scaffold (`VulkanDeviceMixin` +
-  `DlssRenderState`) **and** jitter scaffold (`DlssJitter` + `GameRendererMixin` +
-  `ProjectionMixin`) added; all statically verified.
-- **Descriptors LOCKED** via `javap` (Gate A, `docs/javap_dump.txt`): sole `VulkanDevice`
-  ctor + `vkDevice`/`graphicsQueue` fields; `VulkanQueue` is a record (`vkQueue()`,
-  `queueFamilyIndex()`); `GameRenderer.renderLevel(DeltaTracker)` void; `Projection.
-  getMatrix(Matrix4f)` + `width()/height()`. Mixins updated to match; queue capture added.
-- **S1 CONFIRMED** (Gate C): device+queue captured on NVIDIA 596.49 / Vulkan 1.4;
-  `VulkanDeviceMixin` promoted to `require=1`.
-- **S2 CONFIRMED** (Gate C): both jitter mixins fire; offsets/NDC exact; all 3 mixins
-  now `require=1`. **Milestone M1 complete.**
-- **M2 DONE (S3 confirmed):** half-res world upscales to native, HUD crisp. P1-6 also
-  satisfied (HUD native by construction). We now have all the *rendering* pieces DLSS
-  needs except motion vectors.
-- **CONSOLIDATED (2026-07-10) — BUILD SUCCESSFUL, all working features verified.** Decision:
-  stop at a proven foundation before the multi-week MV/DLSS-native grind. Wrote
-  `IMPLEMENTATION_GUIDE.md` (resumable spec for MV approaches A/B + DLSS wiring) + real
-  README. Everything that works is `require=1`, runtime-verified, committed.
-  Note: F8 render-scale keybind was **deferred** — the fabric key-mapping API package
-  changed in this version; render scale is set via `DlssResolution.scale` (default 0.5),
-  and `cycleScale()` + a code TODO are in place for wiring the keybind later.
-  To resume: read `docs/IMPLEMENTATION_GUIDE.md` → §3 (motion vectors) or §4 (DLSS).
-- **2026-07-10 (later session) — P1-7 DECIDED: Approach B (MRT velocity), terrain-first.**
-  Slice 1 (camera-only velocity) coded: `dlss/DlssVelocity` (RG16F target + fullscreen
-  pass + Gate-D debug overlay, `showDebug=true`), `dlss_velocity.fsh` /
-  `dlss_velocity_debug.fsh`, wired at `renderLevel` RETURN. After Gate-A2 javap dumps
-  (`docs/javap_mv_dump.txt`, `docs/class_grep.txt`): reworked to fold the whole
-  reprojection into ONE matrix (`DlssMotion.reprojectionMatrix()` =
-  prevVP·T(camDelta)·inv(curVP); exact by homogeneous-scale invariance) and reuse
-  `ProjectionMatrixBuffer` + stock `BindGroupLayouts.PROJECTION` — no custom UBO.
-  `GpuFormat.RG16_FLOAT` javap-confirmed.
-- **S4 CONFIRMED (Gate C+D, 2026-07-10 19:30):** velocity pass compiled + running at
-  internal res (1280x720 @ native 2560x1440); debug overlay shows the correct camera-
-  reprojection field (smooth saturated RG gradients, sign flip across motion boundary,
-  HUD native on top); MV sanity logs alongside; zero renderer errors. One Gate-C crash
-  en route: `ColorTargetState.DEFAULT` = RGBA8 → fixed with the record ctor
-  `(Optional.empty(), RG16_FLOAT, WRITE_ALL)`. Bonus recon (`docs/javap_cts.txt`):
-  `RenderPipeline.Builder.withColorTargetState(int index, …)` + `withUnusedColorTargetState`
-  ⇒ renderpearl natively supports MRT — slice 2 de-risked.
-  **Debug toggle added:** `/dlssmc mv` (translucent scene+velocity composite, opacity
-  scales with motion; default OFF) and `/dlssmc scale` (render-scale cycle — supersedes
-  the deferred F8 keybind TODO) via fabric-command-api-v2 client commands.
-  **Gate A2 part 2 DONE** (`docs/javap_terrain_dump.txt`, `class_grep2.txt`,
-  `shader_list.txt`): terrain pipelines = `RenderPipelines.SOLID_TERRAIN` /
-  `CUTOUT_TERRAIN` / `TRANSLUCENT_TERRAIN` (+ `TERRAIN_SNIPPET`, `BLOCK_SNIPPET`);
-  geometry pass lives in `LevelRenderer.addMainPass` / `executeSolid` /
-  `executeClassicTransparency`; shipped shaders to extend: `terrain.vsh/.fsh`,
-  `block.vsh/.fsh`.
-  **Slice 2 IN PROGRESS:** `terrain_velocity.vsh/.fsh` written (copies of the extracted
-  vanilla terrain shaders + `DlssReprojection` std140 block with unjittered
-  cur/prevT view-proj; clip positions interpolated, divide in FS; velocity at
-  `layout(location=1)`; jittered gl_Position kept — DLSS wants jitter-free MVs).
-  **ARCHITECTURE PIVOT after Gate A3 (2026-07-10):** in-main-pass MRT rejected — Vulkan
-  dynamic rendering requires every pipeline in the pass to declare matching attachment
-  counts, and the main pass hosts unbounded pipelines (entities/particles/outlines/...).
-  **Velocity PREPASS instead:** (1) slice-1 fullscreen pass fills the target
-  (camera-only fallback for sky/entities/translucents); (2) re-draw OPAQUE terrain into
-  the RG16F target via `ChunkSectionsToRender.renderGroup(OPAQUE, ourPass, ...)` with
-  velocity-variant pipelines (built from `TERRAIN_SNIPPET`, single RG16F color target),
-  reusing the LEVEL target's depth (test-equal semantics, no writes needed) for exact
-  occlusion; (3) capture `ChunkSectionsToRender` + the jittered projection slice at
-  `lambda$addMainPass$0` HEAD (they're its params); (4) substitute pipelines via a
-  RenderPass.setPipeline mixin flag-scoped to OUR pass only. Zero Mojang pipeline/pass
-  modifications; extends to entities in P1-8.
-  Key A3 findings (`docs/javap_a3_dump.txt`, `javap_levelrenderer_c.txt`): main pass =
-  first `createRenderPass` (5-arg) in `lambda$addMainPass$0` → `bindDefaultUniforms` →
-  `executeSolid` → `renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, chunkLayerSampler,
-  boolean)`; `BindGroupLayout.builder().withUniform(String, UniformType)`;
-  `RenderPipeline.builder(Snippet...)`; `RenderPassDescriptor.builder()` exists for MRT
-  if ever needed.
-  **RECON SELF-SUFFICIENT (2026-07-10):** discovered Loom's decompiled
-  `-sources.jar` inside `.gradle/loom-cache` in the mounted folder — Claude now reads
-  Mojang source directly (extracted to sandbox /tmp/mcsrc); javap gates A/A2/A3/A4 are
-  OBSOLETE. Human is only needed for Gate B (build) and C/D (run) from here on.
-  **Slice 2 CODED (prepass implementation):** `DlssTerrainVelocity` replays Mojang's
-  per-frame `ChunkSectionsToRender` draw data (public record accessors) for the OPAQUE
-  group into the RG16F target: pipeline = `builder(TERRAIN_SNIPPET)` + our shaders +
-  `ALPHA_CUTOUT=0.5` + custom `DlssReprojection` BindGroupLayout (UNIFORM_BUFFER, two
-  mat4s via `Std140Builder`) + RG16F color target + `DepthStencilState(GEQUAL, false)`
-  (vanilla is reverse-Z; level depth attached read-only → exact occlusion).
-  Capture via new `LevelRendererMixin` @ `executeSolid` HEAD (signature source-verified);
-  prepass runs at renderLevel RETURN after the slice-1 fullscreen fallback (layering:
-  camera-only for sky/entities/translucents, exact for terrain). Shaders rewritten as
-  single-output velocity (prepass has one attachment, not MRT).
-  **Next: Gate B → C → D** (expect: /dlssmc mv shows terrain velocity snapping to
-  geometry, incl. correct parallax during strafing; entities still camera-only until
-  P1-8).
-- **Blocked/awaiting human:** Gate A2 + Gate B on the dev machine; Task **P2-6** (license
-  read); Vulkan-capable dev instance for Gates C/D.
+**STATUS (2026-07-10, end of MV sessions): M0–M3 COMPLETE, runtime-verified. Phase 2
+(DLSS wiring) is next; Streamline SDK v2.12.0 is extracted in the repo root
+(gitignored — NVIDIA license).**
+
+- **M1/M2 (earlier):** Vulkan device+queue captured (S1); Halton jitter on the world
+  projection (S2); resolution decoupling — world at `DlssResolution.scale` (default
+  0.5) upscaled to native, HUD crisp (S3). `/dlssmc scale` cycles the render scale.
+- **M3 — motion vectors (S4/S5):** two-layer architecture, all runtime-verified:
+  1. *Fullscreen camera fallback* (`DlssVelocity` + `dlss_velocity.fsh`): whole
+     reprojection folded into ONE matrix (`DlssMotion.reprojectionMatrix()`), uploaded
+     via Mojang's `ProjectionMatrixBuffer` + stock PROJECTION layout. Covers sky /
+     entities / translucents. Assumed depth 0.0002 (REVERSE-Z: small z = far).
+  2. *Terrain prepass* (`DlssTerrainVelocity` + `terrain_velocity.vsh/.fsh` +
+     `LevelRendererMixin`): replays Mojang's `ChunkSectionsToRender` OPAQUE draws into
+     the RG16F velocity target with a TERRAIN_SNIPPET-derived pipeline, custom
+     `DlssReprojection` UBO, level depth attached GEQUAL/no-write (+2 bias). Exact
+     per-pixel terrain MVs with correct occlusion.
+  Debug overlay: `/dlssmc mv` — log-scaled tint alpha-blended over the finished frame.
+- **Hard-won renderer facts (do not relearn):** renderer is REVERSE-Z
+  (`DepthStencilState.DEFAULT` = GEQUAL; NDC z ≈ near/dist). `GameRenderer.renderLevel`
+  switches to the 3D-HUD projection AND **clears the level depth to far** before
+  `renderItemInHand` — so anything needing world depth (velocity prepass; the P2-3
+  DLSS depth tag!) must run at `LevelRenderer.render` RETURN, not renderLevel RETURN.
+  Uniform state must be SNAPSHOTTED at executeSolid time for replays. Debug overlays
+  must alpha-blend over the backbuffer, never re-draw the scene from the level texture.
+- **Deferred:** P1-8 entity MVs (do after DLSS is live; ghosting will show how much
+  they matter), P1-9 particles/water, water/translucent velocity.
+- **NEXT — Phase 2 (M4):** Streamline SDK docs/headers are readable in-repo
+  (`streamline-sdk-v2.12.0/`). Key discovery: SL's **manual-hooking proxies** for
+  `vkCreateInstance`/`vkCreateDevice` add all required extensions/features/queues
+  automatically → P2-1 collapses into P2-2. Plan: (1) FFM (Panama) bridge loading
+  `sl.interposer.dll`; `slInit` at client init (before renderer start); (2) mixin
+  redirect of Mojang's instance/device creation through SL proxies (fallback: full
+  manual via `slGetFeatureRequirements` + `slSetVulkanInfo` with handles from
+  `DlssRenderState`); (3) per-frame tags (P2-3): color = level target, depth =
+  **pre-hand-clear**, MV = `DlssVelocity.velocityTarget()`, jitter =
+  `DlssJitter.pixelOffsetX/Y()`; replace the NEAREST upscale blit with slEvaluate.
+  Human: read `streamline-sdk-v2.12.0/license.txt` (P2-6, ships gate).
 
 ---
 
@@ -138,14 +88,14 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P1-4 Jitter **runtime-verified on the WORLD projection (S2)**: `@ModifyArg` on `getBuffer(Matrix4f)` fires; `jitter applied to WORLD projection dims=854x480 ndc=(-5.85e-4,6.94e-4)`, no injection errors. `ProjectionMixin` (HUD) retired.
 - [x] P1-5 **Resolution decoupling VISUALLY CONFIRMED (S3)**: at scale=0.5 the 3D world renders blocky/half-res and upscales to native; HUD crisp. Field-swap of `mainRenderTarget` redirects the whole world render graph as predicted.
 - [x] P1-6 HUD/UI at native res — satisfied by the P1-5 design: world upscales into the native target at `renderLevel` RETURN, then vanilla GUI renders into that native target. Confirmed crisp HUD over half-res world.
-- [~] P1-7 Motion vectors — reprojection math CPU-verified; custom-shader **pipeline plumbing confirmed** (UV gradient). **BLOCKER found:** renderpearl does not expose the depth buffer for direct `sampler2D` sampling — Mojang only uses `depthTextureView` as a *depth attachment*; the sole sampled "depth" is a *color* depth-bounds target. A screen-space camera-reprojection MV pass needs per-pixel depth, so it requires either:
+- [x] P1-7 Motion vectors — DONE (see M3 in RESUME); originally: reprojection math CPU-verified; custom-shader **pipeline plumbing confirmed** (UV gradient). **BLOCKER found:** renderpearl does not expose the depth buffer for direct `sampler2D` sampling — Mojang only uses `depthTextureView` as a *depth attachment*; the sole sampled "depth" is a *color* depth-bounds target. A screen-space camera-reprojection MV pass needs per-pixel depth, so it requires either:
   - (A) a **depth-resolve pass** that writes scene depth into a color/R32F target (then sample that), or
   - (B) **MRT velocity output** written during the geometry pass (chunk/entity pipelines emit velocity to a 2nd color attachment) — the DLSS-canonical way, but invasive across many pipelines.
   This is the biggest, most iteration-heavy Phase-1 item (as the brief predicted).
   **DECIDED 2026-07-10: Approach B**, staged — slice 1 (camera-only fullscreen velocity, exact for rotation, coded, awaiting Gate A2/B) → slice 2 (MRT terrain) → P1-8 (entities).
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).
 - [ ] P1-9 Motion vectors: chunks/terrain (mostly camera-only) + particles/water passes as needed.
-- [~] P1-10 Depth: level target uses `D32_FLOAT`. Raw depth texture is **not sampleable** as `sampler2D` in renderpearl (returns 0). Reverse-Z/space still TBD once depth is obtained via (A) or (B) above.
+- [x] P1-10 Depth: RESOLVED — renderer is REVERSE-Z (GEQUAL default, NDC z≈near/dist), `D32_FLOAT`. The old "depth samples as 0" finding was (at least partly) the renderItemInHand depth-CLEAR: GameRenderer wipes level depth to far (0.0) mid-renderLevel. Depth IS usable as an attachment pre-clear (the prepass proves it). For P2-3 the DLSS depth tag must be taken at LevelRenderer.render RETURN.
 
 ### Phase 2 — DLSS integration
 - [ ] P2-1 Inject DLSS-required VK **instance/device extensions + features** into `VulkanBackend`/`VulkanInstance`/`FeatureSet` before `vkCreateDevice`.
