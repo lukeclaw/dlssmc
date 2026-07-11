@@ -23,7 +23,9 @@ prev==cur, zero MVs on the cut frame; `capture()` now takes the ClientLevel for 
 identity check) — AWAITING Gate B/D: nether portal / /tp / respawn should log
 `camera cut (...) — DLSS history reset requested` with no one-frame smear on arrival;
 normal play must never log a cut. After that only P2-6 (license read, human) gates
-shipping.** Iter 1 (y-flip only) did NOT help — correctly so: real bug found
+shipping. Phase 3 (DLSS-G frame generation) backlog is now defined below (P3-1…P3-7,
+incl. the vsync/fps-cap policy) — do not start it before P2-4 verifies and P2-6 is
+read.** Iter 1 (y-flip only) did NOT help — correctly so: real bug found
 in the SDK header. `sl_consts.h:203`: mvecScale **normalizes** MVs into [-1,1]
 (pixel-space MVs → {1/renderW, 1/renderH}, DLSS guide §migration). Our buffer is
 UV-space (full screen = 1.0) — already normalized — but the code sent
@@ -97,6 +99,7 @@ javadoc. Streamline SDK v2.12.0 extracted at repo root (gitignored — NVIDIA li
 - [x] **M3 — Motion vectors (terrain)** — VERIFIED 2026-07-10: exact per-pixel terrain MVs (prepass) + camera fallback (sky/entities/translucents); overlay-verified incl. occlusion. Entity MVs deferred to P1-8 (post-DLSS, ghosting-guided). Gate-D bug hunt fixed: reverse-Z assumed depth, hand-FOV projection displacement, overlay scene re-draw ghosting, and the renderItemInHand depth-clear (velocity passes must run at LevelRenderer.render RETURN; **P2-3 note: DLSS depth tag must also be grabbed pre-clear**).
 - [x] **M4 — DLSS on** — **VERIFIED 2026-07-11**: Streamline manual-hooked via creation proxies; DLSS-SR upscaling live in-game (1280x685 → 2560x1369, MaxPerformance) on RTX 4070 SUPER / driver 596.49. Quality bar (ghosting/artifact tuning) is M5.
 - [ ] **M5 — Quality bar** — no gross ghosting; reset flag correct; prototype demo.
+- [ ] **M6 — Frame generation (DLSS-G)** — FG live with Reflex; vsync mutually exclusive with FG; fps cap applies to RENDERED frames (presented = cap × FG factor); MFG pass-through (50-series only, untestable on dev HW).
 
 ---
 
@@ -137,6 +140,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P2-5 Artifact tuning — **COMPLETE 2026-07-11**: translation noise solved (mvecScale inversion); user-verified no entity ghosting and no pitch issues at defaults (mvSign=(1,-1), jitterSign=(1,1), auto mode). P1-8 entity MVs not needed for the quality bar.
 - [ ] P2-6 **[!] Human:** read NVIDIA Streamline SDK EULA in the release zip; resolve redistribution before shipping (**Risk 3**).
 
+### Phase 3 — Frame generation (DLSS-G / DLSS-MFG)  *(backlog, defined 2026-07-11)*
+
+> Sources: `streamline-sdk-v2.12.0/docs/ProgrammingGuideDLSS_G.md` (+ Reflex guide).
+> Same discipline as Phase 2: SL interposer routing is ALL-OR-NOTHING (P2-2 lesson).
+
+- [ ] P3-1 **Swapchain/present routing** — the piece deliberately skipped in P2-2: mixin-redirect ALL of Mojang's `vkCreateSwapchainKHR` / `vkGetSwapchainImagesKHR` / `vkAcquireNextImageKHR` / `vkQueuePresentKHR` / destroy + the resize-recreate path through SL's proxies (FG injects generated frames at present via its replacement swapchain). Biggest risk item; expect P2-2-style crash iterations, esp. on resize/F11.
+- [ ] P3-2 **slInit features** — `featuresToLoad += kFeatureDLSS_G, kFeatureReflex, kFeaturePCL` (lazy slInit already precedes instance creation; proxies then add FG's extra device extensions/queues automatically).
+- [ ] P3-3 **Reflex + PCL markers** — HARD requirement (FG refuses to run without): per-frame `eSimulationStart/End`, `eRenderSubmitStart/End`, `ePresentStart/End` markers whose frame indices match the Constants frame token EXACTLY (guide: "common constants cannot be found for frame N" = marker/token desync). Needs mixins in Minecraft's frame loop — new territory outside the render graph.
+- [ ] P3-4 **Present-lifecycle tags** — depth + MV currently `eValidUntilEvaluate`; FG consumes at PRESENT time → stable copies tagged `eValidUntilPresent` (velocity target is rewritten next frame). Tag **HUD-less color** (critical for quality per guide §5.2) — we already have the exact buffer: native target right after the DLSS copy, before hand/HUD (early-restore point) — one extra copy. UI-Alpha deferred: MC has no HUD alpha buffer; proper fix = render HUD offscreen RGBA + composite; v1 accepts HUD shimmer on generated frames.
+- [ ] P3-5 **Options + controls** — `slDLSSGSetOptions`/`slDLSSGGetState`, `/dlssmc fg` toggle + readout (status, fail reasons, VRAM estimate, actual presented fps).
+- [ ] P3-6 **Frame pacing policy (DECIDED 2026-07-11)** — (a) vsync and FG are MUTUALLY EXCLUSIVE: enabling FG forces vsync off (restore user setting when FG turns off); (b) the fps limit caps RENDERED (real) frames only — FG multiplies presentation ABOVE the cap (e.g. cap 60 + 2× FG = 120 presented). Verify Mojang's limiter throttles the game loop (real frames) and never sees generated presents; note F3 fps shows real frames — presented fps via `/dlssmc fg` readout (P3-5).
+- [ ] P3-7 **Multi-frame generation** — `numFramesToGenerate` up to 3 (4×) / `DLSSGMode::eDynamic` pass-through; hardware-gated to RTX 50-series — `slDLSSGGetState` caps query decides UI; UNTESTABLE on dev 4070 SUPER (ship as experimental).
+
 ### Verification (ongoing)
 - [x] V-1 **BUILD SUCCESSFUL** on the dev machine (JDK 25 toolchain) — all mixins + DlssJitter/DlssRenderState compile against 26.3-snapshot-3 (2026-07-10).
 - [x] V-2 Runtime handle-capture confirmed — non-zero device+queue handles logged (2026-07-10).
@@ -172,4 +188,5 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-10 | Pin `26.3-snapshot-3`; bump deliberately. | Vulkan internals change weekly (PRD §7). |
 | 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a clean Vulkan path. |
 | 2026-07-11 | P2-1 collapsed into P2-2 via SL creation proxies; swapchain/present hooks skipped. | ManualHooking guide §4.2: proxies add required extensions/features/queues; sl_hooks.h swapchain hooks only matter for Frame Generation (out of scope). |
-| 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempo
+| 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempotent for backend restarts. |
+| 2026-07-11 | FG pacing: vsync mutually exclusive with FG; fps cap applies to rendered frames only (presented = cap × FG factor). | User decision. Vsync fights FG pacing (Reflex owns it); cap-on-real-frames preserves the intuitive "60 cap → 120 presented at 2×" behavior. |
