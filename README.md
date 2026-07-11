@@ -14,7 +14,7 @@ Rendering foundation is built and runtime-verified on real hardware (NVIDIA / Vu
 - Vulkan device + queue capture (for Streamline manual hooking)
 - Sub-pixel projection jitter on the world (Halton 2,3)
 - Resolution decoupling — 3D world renders at reduced internal res and upscales to
-  native, HUD stays crisp (press **F8** to cycle native / Quality / Performance)
+  native, HUD stays crisp (render scale via `DlssResolution.scale`, default 0.5)
 - Custom renderpearl shader pipeline
 - Motion vectors: math done; GPU pass pending (see the guide)
 - NVIDIA Streamline / DLSS wiring: Phase 2 (pending)
@@ -32,7 +32,9 @@ Requires **JDK 25** and an NVIDIA RTX GPU with a Vulkan 1.2+ driver.
 ./gradlew runClient    # launch; then Video Settings -> Graphics -> "Prefer Vulkan"
 ```
 
-In-game, load a world and press **F8** to cycle the internal render scale.
+Render scale is set by `DlssResolution.scale` (default 0.5 = Performance). An F8
+keybind to cycle it live is a documented TODO in `DLSSmcClient` (pending the current
+Fabric key-mapping API package).
 
 ## License
 
