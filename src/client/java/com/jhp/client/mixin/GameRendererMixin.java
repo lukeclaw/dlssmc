@@ -4,7 +4,6 @@ import com.jhp.client.dlss.DlssJitter;
 import com.jhp.client.dlss.DlssDebug;
 import com.jhp.client.dlss.DlssMotion;
 import com.jhp.client.dlss.DlssResolution;
-import com.jhp.client.dlss.DlssTerrainVelocity;
 import com.jhp.client.dlss.DlssVelocity;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
@@ -68,15 +67,9 @@ public abstract class GameRendererMixin {
     @Inject(method = "renderLevel", at = @At("RETURN"), require = 1)
     private void dlssmc$onRenderLevelReturn(CallbackInfo ci) {
         DlssJitter.endLevelFrame();
-        // P1-7: fill the velocity target at the internal (DLSS input) resolution.
-        // Slice 1 (fullscreen camera-only) first as fallback for sky/entities/
-        // translucents, then slice 2 overwrites terrain pixels with exact geometry
-        // velocity (depth-tested against the level target's depth buffer).
-        // During decoupling mainRenderTarget is still the low-res level target here.
-        if (DlssVelocity.enabled && this.mainRenderTarget != null) {
-            DlssVelocity.render(this.mainRenderTarget.width, this.mainRenderTarget.height);
-            DlssTerrainVelocity.renderPrepass(DlssVelocity.velocityTarget(), this.mainRenderTarget);
-        }
+        // NOTE: the velocity passes moved to LevelRendererMixin (render RETURN) —
+        // GameRenderer clears the level depth to far for renderItemInHand BEFORE
+        // renderLevel returns, which broke the prepass depth test here.
         if (this.dlssmc$savedTarget != null) {
             RenderTarget real = this.dlssmc$savedTarget;
             TextureTarget level = DlssResolution.levelTarget();
