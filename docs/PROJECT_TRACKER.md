@@ -37,9 +37,39 @@
   changed in this version; render scale is set via `DlssResolution.scale` (default 0.5),
   and `cycleScale()` + a code TODO are in place for wiring the keybind later.
   To resume: read `docs/IMPLEMENTATION_GUIDE.md` → §3 (motion vectors) or §4 (DLSS).
-- **Blocked/awaiting human:** Task **P2-6** (license read) and running an actual
-  Vulkan-capable dev instance (needs the NVIDIA RTX machine + `genSources` in IntelliJ;
-  cannot be done in this sandbox).
+- **2026-07-10 (later session) — P1-7 DECIDED: Approach B (MRT velocity), terrain-first.**
+  Slice 1 (camera-only velocity) coded: `dlss/DlssVelocity` (RG16F target + fullscreen
+  pass + Gate-D debug overlay, `showDebug=true`), `dlss_velocity.fsh` /
+  `dlss_velocity_debug.fsh`, wired at `renderLevel` RETURN. After Gate-A2 javap dumps
+  (`docs/javap_mv_dump.txt`, `docs/class_grep.txt`): reworked to fold the whole
+  reprojection into ONE matrix (`DlssMotion.reprojectionMatrix()` =
+  prevVP·T(camDelta)·inv(curVP); exact by homogeneous-scale invariance) and reuse
+  `ProjectionMatrixBuffer` + stock `BindGroupLayouts.PROJECTION` — no custom UBO.
+  `GpuFormat.RG16_FLOAT` javap-confirmed.
+- **S4 CONFIRMED (Gate C+D, 2026-07-10 19:30):** velocity pass compiled + running at
+  internal res (1280x720 @ native 2560x1440); debug overlay shows the correct camera-
+  reprojection field (smooth saturated RG gradients, sign flip across motion boundary,
+  HUD native on top); MV sanity logs alongside; zero renderer errors. One Gate-C crash
+  en route: `ColorTargetState.DEFAULT` = RGBA8 → fixed with the record ctor
+  `(Optional.empty(), RG16_FLOAT, WRITE_ALL)`. Bonus recon (`docs/javap_cts.txt`):
+  `RenderPipeline.Builder.withColorTargetState(int index, …)` + `withUnusedColorTargetState`
+  ⇒ renderpearl natively supports MRT — slice 2 de-risked.
+  **Debug toggle added:** `/dlssmc mv` (translucent scene+velocity composite, opacity
+  scales with motion; default OFF) and `/dlssmc scale` (render-scale cycle — supersedes
+  the deferred F8 keybind TODO) via fabric-command-api-v2 client commands.
+  **Gate A2 part 2 DONE** (`docs/javap_terrain_dump.txt`, `class_grep2.txt`,
+  `shader_list.txt`): terrain pipelines = `RenderPipelines.SOLID_TERRAIN` /
+  `CUTOUT_TERRAIN` / `TRANSLUCENT_TERRAIN` (+ `TERRAIN_SNIPPET`, `BLOCK_SNIPPET`);
+  geometry pass lives in `LevelRenderer.addMainPass` / `executeSolid` /
+  `executeClassicTransparency`; shipped shaders to extend: `terrain.vsh/.fsh`,
+  `block.vsh/.fsh`.
+  **Next: slice 2 (MRT terrain velocity):** extract those 4 shader sources, then
+  (1) index-1 RG16F `ColorTargetState` on the terrain pipelines, (2) velocity output in
+  their FS (camera-only reprojection from the VS world pos), (3) 2nd color attachment on
+  the main pass's render-pass creation, (4) verify via the `/dlssmc mv` overlay, then
+  drop `ASSUMED_DEPTH`.
+- **Blocked/awaiting human:** Gate A2 + Gate B on the dev machine; Task **P2-6** (license
+  read); Vulkan-capable dev instance for Gates C/D.
 
 ---
 
@@ -77,7 +107,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [~] P1-7 Motion vectors — reprojection math CPU-verified; custom-shader **pipeline plumbing confirmed** (UV gradient). **BLOCKER found:** renderpearl does not expose the depth buffer for direct `sampler2D` sampling — Mojang only uses `depthTextureView` as a *depth attachment*; the sole sampled "depth" is a *color* depth-bounds target. A screen-space camera-reprojection MV pass needs per-pixel depth, so it requires either:
   - (A) a **depth-resolve pass** that writes scene depth into a color/R32F target (then sample that), or
   - (B) **MRT velocity output** written during the geometry pass (chunk/entity pipelines emit velocity to a 2nd color attachment) — the DLSS-canonical way, but invasive across many pipelines.
-  This is the biggest, most iteration-heavy Phase-1 item (as the brief predicted). Decision pending.
+  This is the biggest, most iteration-heavy Phase-1 item (as the brief predicted).
+  **DECIDED 2026-07-10: Approach B**, staged — slice 1 (camera-only fullscreen velocity, exact for rotation, coded, awaiting Gate A2/B) → slice 2 (MRT terrain) → P1-8 (entities).
 - [ ] P1-8 Motion vectors: per-object for entities (previous-frame model transforms).
 - [ ] P1-9 Motion vectors: chunks/terrain (mostly camera-only) + particles/water passes as needed.
 - [~] P1-10 Depth: level target uses `D32_FLOAT`. Raw depth texture is **not sampleable** as `sampler2D` in renderpearl (returns 0). Reverse-Z/space still TBD once depth is obtained via (A) or (B) above.
@@ -129,6 +160,7 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-10 | DLSS **SR only** for v1 (no FG/RR/Reflex). | Scope control for prototype. |
 | 2026-07-10 | Git DB in sandbox `/tmp`, work-tree on the mount; export `.bundle` for persistence. | Cowork mount blocks file deletion, which breaks an in-place `.git`. |
 | 2026-07-10 | Jitter the **world** projection via `@ModifyArg` on `ProjectionMatrixBuffer.getBuffer(Matrix4f)` in `renderLevel`; retire the `Projection.getMatrix()` hook. | Source read showed the world uses `getBuffer(Matrix4f)` (no `getMatrix`); the old hook only jittered the HUD/item projection. `@ModifyArg` targets the exact world upload. |
+| 2026-07-10 | **P1-7 = Approach B (MRT velocity)**, staged: camera-only fullscreen pass first, then MRT terrain, then entities. | Depth is not sampleable (A is blocked on an unsolved depth-resolve); B is DLSS-canonical and extends to entities. The camera-only slice is depth-independent for rotation, so it stands up the target/UBO/pass/conventions with zero recon on geometry pipelines. |
 
 ---
 

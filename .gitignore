@@ -53,3 +53,6 @@ docs/build_out.txt
 docs/run_log.txt
 docs/*.png
 docs/javap_dump.txt
+
+# extracted vanilla shader sources (Mojang assets, reference only)
+/assets/

@@ -42,6 +42,55 @@ and run the four `javap` lines without the `& { }` wrapper.)
 
 ---
 
+## Gate A2 — MV recon (P1-7, run once for the velocity work)
+
+Two parts: **(1)** the API surface the new `DlssVelocity` pass guesses at, **(2)** the
+terrain-pipeline internals needed for slice 2 (MRT velocity in the geometry pass).
+
+```powershell
+$JAR = (Get-ChildItem -Recurse .gradle\loom-cache -Filter 'minecraft-clientOnly-*-26.3-snapshot-3.jar' | Select-Object -First 1).FullName
+$JAR   # should print a path, not blank
+
+# (1) API surface used by DlssVelocity (UBO + formats + pipeline)
+& {
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.GpuFormat
+  javap -p -cp "$JAR" net.minecraft.client.renderer.BindGroupLayouts
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.ColorTargetState
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.pipeline.RenderPipeline
+  javap -p -cp "$JAR" 'com.mojang.renderpearl.api.pipeline.RenderPipeline$Builder'
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.buffers.Std140Builder
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.buffers.GpuBuffer
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.buffers.GpuBufferUsage
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.buffers.GpuBufferSlice
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.device.GpuDevice
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.commands.CommandEncoder
+  javap -p -cp "$JAR" com.mojang.renderpearl.api.commands.RenderPass
+  javap -p -cp "$JAR" net.minecraft.client.renderer.ProjectionMatrixBuffer
+  javap -p -cp "$JAR" com.mojang.blaze3d.pipeline.TextureTarget
+} *> docs\javap_mv_dump.txt
+
+# (2) Terrain/chunk pipeline recon for MRT (slice 2)
+& {
+  javap -p -cp "$JAR" net.minecraft.client.renderer.LevelRenderer
+  javap -p -cp "$JAR" net.minecraft.client.renderer.RenderPipelines
+} *> docs\javap_terrain_dump.txt
+
+# Class-name grep in case RenderPipelines/section classes are named differently
+jar --list --file "$JAR" | Select-String -Pattern 'Pipelines|Section|Terrain|Chunk' *> docs\class_grep.txt
+
+# Shipped terrain shader sources (adjust names from the listing if needed)
+jar --list --file "$JAR" | Select-String -Pattern 'shaders/core' *> docs\shader_list.txt
+```
+
+Then say **"done"** — Claude reads the four `docs\*.txt` files. If a `javap` line errors
+with "class not found", leave it; the error text in the dump is itself the answer.
+
+After reading `docs\shader_list.txt`, Claude will name the 2–3 terrain shader files to
+extract (e.g. `jar --extract --file "$JAR" assets/minecraft/shaders/core/terrain.vsh`
+run from `docs\`).
+
+---
+
 ## Gate B — Compile
 
 ```bash
