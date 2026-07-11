@@ -47,12 +47,20 @@ import java.util.OptionalDouble;
  * pixels pass, giving precise per-pixel motion vectors with correct occlusion — and no
  * Mojang pipeline or render pass is modified.</p>
  *
- * <p>The pipeline derives from {@code TERRAIN_SNIPPET} (same vertex format, bind
- * groups, defines infrastructure) with our shaders, a single RG16F color target, and an
- * extra {@code DlssReprojection} UBO (two mat4s: unjittered current view-proj, and
- * prev view-proj with the camera delta folded in — from {@link DlssMotion}).
- * {@code ALPHA_CUTOUT=0.5} is set for the whole group: solid-layer alpha is 1.0, so the
- * discard only bites on cutout geometry (leaves/grass), matching vanilla coverage.</p>
+ * <p><b>Uniform snapshot (Gate-D bug 2026-07-10):</b> the prepass runs at renderLevel
+ * RETURN, but {@code GameRenderer} switches the projection to the 3D-HUD buffer for
+ * {@code renderItemInHand} BEFORE renderLevel returns — {@code bindDefaultUniforms} at
+ * replay time therefore bound the hand-FOV projection, displacing all prepass geometry
+ * (velocity floated ~1 block off the terrain; occluded geometry leaked through in "air"
+ * pixels where the displaced depth test passed). Fix: snapshot Projection/Fog/Globals/
+ * Lighting at {@code executeSolid} HEAD — the exact state the main terrain pass used —
+ * and bind those in the replay.</p>
+ *
+ * <p>The pipeline derives from {@code TERRAIN_SNIPPET} with our shaders, a single RG16F
+ * color target, and an extra {@code DlssReprojection} UBO (two mat4s: unjittered current
+ * view-proj, and prev view-proj with the camera delta folded in — from
+ * {@link DlssMotion}). {@code ALPHA_CUTOUT=0.5} is set for the whole group: solid-layer
+ * alpha is 1.0, so the discard only bites on cutout geometry (leaves/grass).</p>
  *
  * <p>Entities/translucents keep the slice-1 camera-only fallback until P1-8.</p>
  */
@@ -63,6 +71,11 @@ public final class DlssTerrainVelocity {
 
     /** Per-frame draw data captured at LevelRenderer.executeSolid HEAD; consumed once. */
     private static ChunkSectionsToRender capturedDraws;
+    /** Uniform state snapshotted at the same moment (see class javadoc). */
+    private static GpuBufferSlice capturedProjection;
+    private static GpuBufferSlice capturedFog;
+    private static GpuBuffer capturedGlobals;
+    private static GpuBufferSlice capturedLights;
 
     private static BindGroupLayout reprojectionLayout;
     private static RenderPipeline pipeline;
@@ -70,9 +83,16 @@ public final class DlssTerrainVelocity {
     private static GpuBufferSlice uboSlice;
     private static boolean loggedOnce;
 
-    /** Called from {@code LevelRendererMixin} each frame with the live draw data. */
+    /**
+     * Called from {@code LevelRendererMixin} at executeSolid HEAD: capture the live
+     * draw data AND the uniform state the main terrain pass is about to render with.
+     */
     public static void captureFrame(ChunkSectionsToRender draws) {
         capturedDraws = draws;
+        capturedProjection = RenderSystem.getProjectionMatrixBuffer();
+        capturedFog = RenderSystem.getShaderFog();
+        capturedGlobals = RenderSystem.getGlobalSettingsUniform();
+        capturedLights = RenderSystem.getShaderLights();
     }
 
     /**
@@ -87,7 +107,7 @@ public final class DlssTerrainVelocity {
         }
         GpuTextureView velocityView = velocityTarget.getColorTextureView();
         GpuTextureView depthView = levelTarget.getDepthTextureView();
-        if (velocityView == null || depthView == null) {
+        if (velocityView == null || depthView == null || capturedProjection == null) {
             return;
         }
 
@@ -108,7 +128,18 @@ public final class DlssTerrainVelocity {
                 .createCommandEncoder()
                 .createRenderPass(() -> "DLSS terrain velocity prepass", velocityView,
                         Optional.empty(), depthView, OptionalDouble.empty())) {
-            RenderSystem.bindDefaultUniforms(pass); // Projection (jittered), Fog, Globals, Lighting
+            // NOT bindDefaultUniforms: bind the SNAPSHOTTED state the main terrain pass
+            // used (the live state holds the hand/HUD projection by now — see javadoc).
+            pass.setUniform("Projection", capturedProjection);
+            if (capturedFog != null) {
+                pass.setUniform("Fog", capturedFog);
+            }
+            if (capturedGlobals != null) {
+                pass.setUniform("Globals", capturedGlobals);
+            }
+            if (capturedLights != null) {
+                pass.setUniform("Lighting", capturedLights);
+            }
             pass.setUniform("DlssReprojection", uboSlice);
             pass.bindTexture("Sampler0", draws.textureView(),
                     RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
