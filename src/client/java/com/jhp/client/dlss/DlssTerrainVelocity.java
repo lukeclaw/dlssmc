@@ -168,9 +168,13 @@ public final class DlssTerrainVelocity {
                     .withBindGroupLayout(reprojectionLayout())
                     .withColorTargetState(new ColorTargetState(
                             Optional.empty(), GpuFormat.RG16_FLOAT, ColorTargetState.WRITE_ALL))
-                    // Vanilla reverse-Z compare, but no depth writes: equal-depth terrain
-                    // passes; everything else is occluded correctly.
-                    .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
+                    // Vanilla reverse-Z compare, no depth writes: equal-depth terrain
+                    // passes; everything else is occluded. A tiny positive constant depth
+                    // bias (+2 ulp toward the camera in reverse-Z) absorbs cross-program
+                    // gl_Position rounding differences so borderline fragments don't drop
+                    // out (GLSL gives no invariance guarantee between Mojang's terrain
+                    // program and ours).
+                    .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false, 0.0F, 2.0F))
                     .build();
         }
         return pipeline;

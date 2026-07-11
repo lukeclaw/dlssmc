@@ -21,25 +21,21 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 
 /**
- * Motion-vector velocity target (P1-7, Approach B — slice 1: camera-only).
+ * Motion-vector velocity target (P1-7, Approach B — slice 1: camera-only fallback).
  *
  * <p>Owns the RG16-float velocity {@link TextureTarget} DLSS will consume, plus a
  * full-screen pass that fills it with <b>camera-only</b> velocity. The whole
- * reprojection chain — un-project current NDC (at an assumed mid depth, matching
- * {@code DlssMotion.debugSanityCheck}), shift by the camera delta, re-project with the
- * previous view-proj — is folded into a <b>single matrix</b> on the CPU
- * ({@link DlssMotion#reprojectionMatrix()}); perspective division's invariance under
- * homogeneous scaling makes this exact. One mat4 means the pass reuses Mojang's own
- * {@link ProjectionMatrixBuffer} (std140 upload) and the stock
- * {@code BindGroupLayouts.PROJECTION} layout — no custom UBO plumbing. The shader block
- * mirrors vanilla's {@code Projection / ProjMat} naming.</p>
+ * reprojection chain — un-project current NDC (at an assumed far depth), shift by the
+ * camera delta, re-project with the previous view-proj — is folded into a
+ * <b>single matrix</b> on the CPU ({@link DlssMotion#reprojectionMatrix()});
+ * perspective division's invariance under homogeneous scaling makes this exact. One
+ * mat4 means the pass reuses Mojang's own {@link ProjectionMatrixBuffer} (std140
+ * upload) and the stock {@code BindGroupLayouts.PROJECTION} layout — no custom UBO
+ * plumbing. The shader block mirrors vanilla's {@code Projection / ProjMat} naming.</p>
  *
- * <p><b>Accuracy note:</b> with a fixed assumed depth this is exact for camera
- * <i>rotation</i> (depth-independent) and approximate for camera <i>translation</i>.
- * Slice 2 (MRT velocity written during the geometry pass — see
- * {@code docs/IMPLEMENTATION_GUIDE.md} §3) replaces the assumed depth with real geometry
- * and adds per-object motion. This slice exists to stand up the target, the pass, and
- * the sign/space conventions so slice 2 only has to swap the source of truth.</p>
+ * <p><b>Layering:</b> this pass runs first each frame as the fallback for sky,
+ * entities, and translucents; the slice-2 terrain prepass ({@link DlssTerrainVelocity})
+ * then overwrites terrain pixels with exact geometry velocity.</p>
  */
 public final class DlssVelocity {
     private DlssVelocity() {}
@@ -49,8 +45,15 @@ public final class DlssVelocity {
     /** Overlay the velocity target on screen (toggled by the /dlssmc mv client command). */
     public static volatile boolean showDebug = false;
 
-    /** Assumed NDC depth for un-projection; MUST match DlssMotion.debugSanityCheck (0.5). */
-    public static final float ASSUMED_DEPTH = 0.5f;
+    /**
+     * Assumed NDC depth for the fullscreen fallback's un-projection. The renderer is
+     * REVERSE-Z (NDC z ~ near/distance), so "far away" means a SMALL z: 0.0002 with
+     * near=0.05 is ~250 blocks — appropriate for what the fallback covers (sky, distant
+     * pixels). The original 0.5 meant ~0.1 blocks and blew up the translation term
+     * (rainbow sky, Gate D 2026-07-10). MUST match dlss_velocity.fsh and
+     * DlssMotion.debugSanityCheck.
+     */
+    public static final float ASSUMED_DEPTH = 0.0002f;
 
     private static TextureTarget velocityTarget;
     private static RenderPipeline velocityPipeline;

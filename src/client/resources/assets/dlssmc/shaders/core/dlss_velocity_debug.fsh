@@ -12,9 +12,12 @@ in vec2 texCoord;
 
 out vec4 fragColor;
 
-const float AMPLIFY = 20.0;
-const float MIN_OPACITY = 0.08;
-const float MAX_OPACITY = 0.65;
+// Lower amplification + opacity cap than the first iteration: at AMPLIFY=20 /
+// max 0.65 a fast strafe saturated near terrain into a wash that read as
+// "seeing through the floor" (Gate D feedback).
+const float AMPLIFY = 8.0;
+const float MIN_OPACITY = 0.05;
+const float MAX_OPACITY = 0.45;
 
 void main() {
     vec3 scene = texture(Sampler0, texCoord).rgb;

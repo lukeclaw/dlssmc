@@ -15,10 +15,9 @@ import org.joml.Vector4f;
  * clip = proj · viewRot · (worldPos − cameraPos); reprojection must therefore carry the
  * camera-position delta between frames.</p>
  *
- * <p>Next iteration: feed {@link #currentViewProj()}/{@link #previousViewProj()} and the
- * camera delta into a full-screen fragment shader that reads depth, reconstructs the
- * world point, reprojects with the previous matrices, and writes per-pixel velocity into
- * an RG16F target.</p>
+ * <p>The GPU consumers are {@code DlssVelocity} (fullscreen fallback, single folded
+ * reprojection matrix) and {@code DlssTerrainVelocity} (terrain prepass, cur/prevT
+ * matrix pair).</p>
  */
 public final class DlssMotion {
     private DlssMotion() {}
@@ -57,7 +56,7 @@ public final class DlssMotion {
             primed = true;
         }
 
-        // Derived matrices for the GPU velocity pass (DlssVelocity):
+        // Derived matrices for the GPU velocity passes (DlssVelocity/DlssTerrainVelocity):
         // prevRel = rel + camDelta  =>  prevClip = prevVP * T(camDelta) * rel.
         curInvViewProj.set(curViewProj).invert();
         prevViewProjTranslated.set(prevViewProj).translate(camDeltaX(), camDeltaY(), camDeltaZ());
@@ -77,10 +76,11 @@ public final class DlssMotion {
     public static float camDeltaZ() { return (float) (curCamZ - prevCamZ); }
 
     /**
-     * CPU validation of the exact reprojection the shader will do: for the screen-centre
-     * pixel at a mid depth, reconstruct the world point from the current view-proj and
-     * reproject it with the previous frame's matrices. Logs the resulting motion vector
-     * in NDC when the camera actually moved, throttled so it doesn't spam.
+     * CPU validation of the exact reprojection the fullscreen shader does: for the
+     * screen-centre pixel at the assumed fallback depth, reconstruct the world point
+     * from the current view-proj and reproject it with the previous frame's matrices.
+     * Logs the resulting motion vector in NDC when the camera actually moved, throttled
+     * so it doesn't spam.
      */
     private static void debugSanityCheck() {
         float dx = camDeltaX(), dy = camDeltaY(), dz = camDeltaZ();
@@ -88,8 +88,9 @@ public final class DlssMotion {
         if (!moved || (frame % 30) != 0) {
             return;
         }
-        // Centre pixel, NDC (0,0), mid depth (Vulkan clip z in [0,1]).
-        Vector4f clip = new Vector4f(0f, 0f, 0.5f, 1f);
+        // Centre pixel, NDC (0,0), at the fallback's assumed depth (REVERSE-Z: small
+        // z = far). Kept equal to the GPU fallback so values are directly comparable.
+        Vector4f clip = new Vector4f(0f, 0f, DlssVelocity.ASSUMED_DEPTH, 1f);
         Vector4f rel = new Matrix4f(curViewProj).invert().transform(clip);
         if (rel.w == 0f) return;
         rel.div(rel.w); // camera-relative world point (relative to CURRENT camera)
