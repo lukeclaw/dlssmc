@@ -73,6 +73,18 @@ public final class DlssEvaluator {
     /** Master switch (/dlssmc dlss). */
     public static volatile boolean enabled = true;
 
+    // ---- P2-5 runtime tuning knobs (/dlssmc mvx|mvy|jx|jy) ------------------------------
+    // The velocity buffer stores (prevNdc - currNdc) * 0.5 in GL-style NDC (y-UP);
+    // DLSS consumes pixel-space MVs in image space (y-DOWN), so mvecScale.y defaults to
+    // NEGATIVE. Diagnosed 2026-07-11 from Gate-D screenshots: still + yaw-turn clean,
+    // translation noisy (worst on ground = strongest vertical screen-flow) = y-mirrored
+    // history fetch. x confirmed correct by clean yaw. Toggle live to A/B.
+    public static volatile float mvSignX = 1f;
+    public static volatile float mvSignY = -1f;
+    /** Sign of the jitterOffset REPORTED to SL (applied matrix jitter unchanged). */
+    public static volatile float jitterSignX = 1f;
+    public static volatile float jitterSignY = 1f;
+
     /** Set true after an unrecoverable SL error; falls back to the NEAREST blit. */
     private static boolean broken = false;
     private static boolean optionsSent = false;
@@ -104,6 +116,12 @@ public final class DlssEvaluator {
     public static String status() {
         return (broken ? "BROKEN (" + lastError + ")" : enabled ? "on" : "off")
                 + ", frames evaluated: " + frames;
+    }
+
+    /** P2-5 knob readout for the /dlssmc command feedback. */
+    public static String knobs() {
+        return "mvSign=(" + (int) mvSignX + "," + (int) mvSignY
+                + ") jitterSign=(" + (int) jitterSignX + "," + (int) jitterSignY + ")";
     }
 
     /**
@@ -292,12 +310,13 @@ public final class DlssEvaluator {
         putMatrix(c, 224, DlssMotion.reprojectionMatrix());                // clipToPrevClip
         putMatrix(c, 288, new Matrix4f(DlssMotion.reprojectionMatrix()).invert()); // prevClipToClip
 
-        c.set(JAVA_FLOAT, 352, DlssJitter.pixelOffsetX());                 // jitterOffset
-        c.set(JAVA_FLOAT, 356, DlssJitter.pixelOffsetY());
-        // Velocity buffer stores UV-space delta (current->previous); mvecScale converts
-        // to render-res pixels for NGX. Sign/space is THE P2-5 tuning knob.
-        c.set(JAVA_FLOAT, 360, (float) renderW);                           // mvecScale.x
-        c.set(JAVA_FLOAT, 364, (float) renderH);                           // mvecScale.y
+        c.set(JAVA_FLOAT, 352, jitterSignX * DlssJitter.pixelOffsetX());   // jitterOffset
+        c.set(JAVA_FLOAT, 356, jitterSignY * DlssJitter.pixelOffsetY());
+        // Velocity buffer stores UV-space delta (current->previous) in GL NDC (y-up);
+        // mvecScale converts to render-res pixels for NGX (image space, y-down) — hence
+        // the default y NEGATION (mvSignY = -1). Live-tunable: /dlssmc mvx|mvy|jx|jy.
+        c.set(JAVA_FLOAT, 360, mvSignX * renderW);                         // mvecScale.x
+        c.set(JAVA_FLOAT, 364, mvSignY * renderH);                         // mvecScale.y
         c.set(JAVA_FLOAT, 368, 0f);                                        // cameraPinholeOffset
         c.set(JAVA_FLOAT, 372, 0f);
 

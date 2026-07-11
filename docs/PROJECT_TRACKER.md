@@ -16,17 +16,22 @@
 > **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
 > directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
-**STATUS (2026-07-11, end of session): 🎉 M4 COMPLETE — DLSS-SR IS LIVE IN-GAME.
-`DLSS evaluate LIVE: 1280x685 -> 2560x1369` (MaxPerformance), per-frame, no SL errors,
-visually confirmed. User reported "some qualms" (unspecified artifacts) — that is the
-M5/P2-5 agenda: collect screenshots while strafing/turning; likely suspects in tuning
-order: (1) mvecScale sign/space (buffer = UV-space cur→prev, scale={renderW,renderH};
-try negation and/or Y-flip first), (2) jitterOffset sign, (3) matrix transpose
-convention (JOML col-major raw written as SL rows), (4) useAutoExposure (currently
-eTrue; try tagging a fixed 1.0 exposure), (5) entity/particle ghosting → P1-8/P1-9
-entity MVs. Also pending: P2-4 reset flag on teleport/dimension change (plumbing
-exists: DlssJitter.requestReset → Constants.reset; just needs event hooks), P1-8,
-P2-6 license read (human, ships gate). Commands: /dlssmc dlss | sl | mv | scale.
+**STATUS (2026-07-11, session 2): M5/P2-5 iteration 1 — MV Y-FLIP diagnosed, fix built,
+AWAITING GATE B/C/D.** Gate-D screenshot analysis: standing still = sharp; yaw turning =
+clean; ANY translation = noise swaths, worst on near ground and persisting through the
+post-keyrelease deceleration slide; far detail flickers while moving. Diagnosis: velocity
+buffer stores (prevNdc−currNdc)·0.5 in GL NDC (**y-up**) but DLSS consumes image-space
+(**y-down**) MVs after mvecScale — ground has the strongest *vertical* screen-flow when
+translating, yaw is pure-x (hence clean, and x sign confirmed correct). FIX:
+`mvecScale.y` now defaults to **−renderH** via new runtime knobs in `DlssEvaluator`
+(`mvSignX/mvSignY/jitterSignX/jitterSignY`), toggled live by **/dlssmc mvx | mvy | jx |
+jy** (knob readout in chat) — one build, in-game A/B. Next Gate D: retest strafe +
+forward-walk (expect fixed); test **pitch** (look up/down fast — y-flip predicts it was
+smeary before the fix); if residue remains, knob order: jy → jx → mvx. Then remaining
+M5: (3) matrix transpose convention, (4) useAutoExposure (try fixed 1.0 exposure tag),
+(5) entity/particle ghosting → P1-8/P1-9. Also pending: P2-4 reset-flag event hooks
+(plumbing exists: DlssJitter.requestReset → Constants.reset), P2-6 license read (human,
+ships gate). Commands: /dlssmc dlss | sl | mv | scale | mvx | mvy | jx | jy.
 Phase 2 architecture notes below remain accurate.**
 `SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
 `VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's

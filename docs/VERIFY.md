@@ -192,25 +192,25 @@ Screenshots or a short clip while moving:
 
 ---
 
-## What Claude needs from THIS iteration (M5 / P2-5 — artifact tuning)
+## What Claude needs from THIS iteration (M5 / P2-5 iter 2 — MV y-flip fix)
 
-**Status: DLSS-SR is LIVE (verified 2026-07-11).** This iteration is visual tuning only —
-no gates should fail; everything is Gate D now.
+**Iteration-1 result (2026-07-11): translation artifacts diagnosed as MV y-axis flip**
+(GL NDC y-up buffer vs DLSS image-space y-down). Fix: `mvecScale.y = -renderH` default
++ live sign knobs `/dlssmc mvx | mvy | jx | jy` (readout prints in chat).
 
-What to capture (F2 screenshots, or a short clip if easier), each with one line on what
-you were doing:
-1. **Standing still** in a detailed scene (village/forest) — baseline sharpness check.
-2. **Strafing sideways** past near blocks — the classic MV-sign test. Ghost trails or
-   doubled edges ⇒ mvecScale sign/space is wrong (first knob to turn).
-3. **Turning the camera** quickly — rotation is depth-independent, so smearing here but
-   not while strafing points at jitter sign or matrix convention instead.
-4. **Moving entities** (mobs/items) — ghosting expected until P1-8 entity MVs; gauge
-   severity.
-5. Anything from your "qualms" list — describe what bugs you about it.
-
-Also useful: does `/dlssmc dlss` frame counter climb steadily (one per frame)?
-
-Paste each as you get it — you don't have to do all before replying.
+1. **Gate B:** `./gradlew build` — paste `BUILD SUCCESSFUL` or the first `error:` block.
+2. **Gate C/D:** run, Vulkan, load a world. Then:
+   - **Strafe + walk forward** over detailed ground — the iter-1 noise swaths should be
+     GONE. If not: `/dlssmc mvy` (back to old sign) to confirm the knob changes anything
+     at all, then try `/dlssmc jy`, `/dlssmc jx`, `/dlssmc mvx` one at a time (say which
+     combo looks best; readout line tells you the current signs).
+   - **Pitch test:** look up/down rapidly. (Y-flip theory predicts this was smeary
+     before the fix — worth one screenshot either way.)
+   - **Deceleration:** release the key after sprinting — the noise burst during the
+     slide should be gone.
+   - Screenshot each + one line, as before.
+3. Still on the list after this: moving-entity ghosting (P1-8 gauge), useAutoExposure,
+   P2-4 reset hooks.
 
 ---
 

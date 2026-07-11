@@ -57,6 +57,27 @@ public class DLSSmcClient implements ClientModInitializer {
 							ctx.getSource().sendFeedback(Component.literal(
 									"[DLSSmc] render scale: " + DlssResolution.scale));
 							return 1;
+						}))
+						// P2-5 live tuning knobs: flip a sign, watch the artifacts.
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mvx").executes(ctx -> {
+							DlssEvaluator.mvSignX = -DlssEvaluator.mvSignX;
+							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
+							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mvy").executes(ctx -> {
+							DlssEvaluator.mvSignY = -DlssEvaluator.mvSignY;
+							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
+							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("jx").executes(ctx -> {
+							DlssEvaluator.jitterSignX = -DlssEvaluator.jitterSignX;
+							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
+							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("jy").executes(ctx -> {
+							DlssEvaluator.jitterSignY = -DlssEvaluator.jitterSignY;
+							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
+							return 1;
 						}))));
 	}
 }
