@@ -21,8 +21,9 @@ P2-5 verified (noise gone, no ghosting, no pitch issues; mvecScale inversion was
 root cause). P2-4 verified (camera-cut reset). The ONLY remaining pre-ship item is
 P2-6: human reads `streamline-sdk-v2.12.0/license.txt` + the redistribution terms for
 sl.interposer.dll / nvngx_dlss.dll before publishing the mod (Risk 3). NEXT ENGINEERING
-WORK: Phase 3 frame generation — backlog fully specified below (P3-1…P3-7), start at
-P3-1 (swapchain/present routing). Commands: /dlssmc dlss | sl | mv | scale | mode |
+WORK: Phase 3 frame generation — read [`FRAMEGEN_BRIEF.md`](./FRAMEGEN_BRIEF.md)
+FIRST (full implementation spec: API GUIDs/offsets, SL_INTERCEPT list, staged plan
+FG-1…FG-7, process rules), then the P3 backlog below. Commands: /dlssmc dlss | sl | mv | scale | mode |
 mvx | mvy | jx | jy.**
 `SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
 `VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's
