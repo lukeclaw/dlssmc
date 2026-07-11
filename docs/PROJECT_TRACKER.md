@@ -16,32 +16,14 @@
 > **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
 > directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
-**STATUS (2026-07-11, session 2): P2-5 COMPLETE (user-verified: noise gone, no entity
-ghosting, no pitch issues). P2-4 CODED — camera-cut detector in `DlssMotion.capture`
-(level swap or >8-block one-frame jump → `DlssJitter.requestReset()` + re-prime so
-prev==cur, zero MVs on the cut frame; `capture()` now takes the ClientLevel for the
-identity check) — AWAITING Gate B/D: nether portal / /tp / respawn should log
-`camera cut (...) — DLSS history reset requested` with no one-frame smear on arrival;
-normal play must never log a cut. After that only P2-6 (license read, human) gates
-shipping. Phase 3 (DLSS-G frame generation) backlog is now defined below (P3-1…P3-7,
-incl. the vsync/fps-cap policy) — do not start it before P2-4 verifies and P2-6 is
-read.** Iter 1 (y-flip only) did NOT help — correctly so: real bug found
-in the SDK header. `sl_consts.h:203`: mvecScale **normalizes** MVs into [-1,1]
-(pixel-space MVs → {1/renderW, 1/renderH}, DLSS guide §migration). Our buffer is
-UV-space (full screen = 1.0) — already normalized — but the code sent
-{renderW, renderH}: the convention INVERTED, MVs delivered ~10³× too large. Explains all
-iter-1 Gate-D evidence: still = sharp (MV=0); fast motion (turn/sprint) = history
-rejected → raw low-res shimmer ("far pixels change intensely frame by frame"); SLOW
-translation (deceleration slide) = plausible-but-wrong pixel range → wrong-history
-blends = the noise swaths, worst at low speed; sign toggles no-ops at 10³× magnitude
-error. FIX: mvecScale = {mvSignX, mvSignY} = unity signs only (y still defaults −1 for
-the GL-y-up vs image-y-down question — now actually testable). Knobs /dlssmc mvx | mvy |
-jx | jy remain. Next Gate D: strafe/walk/decelerate (expect fixed or hugely better);
-then A/B mvy both ways; pitch test; then remaining M5: matrix transpose convention,
-useAutoExposure (fixed 1.0 exposure tag), entity/particle ghosting → P1-8/P1-9. Also
-pending: P2-4 reset-flag event hooks, P2-6 license read (human, ships gate). Commands:
-/dlssmc dlss | sl | mv | scale | mvx | mvy | jx | jy. Phase 2 architecture notes below
-remain accurate.**
+**STATUS (2026-07-11, end of session 2): 🎉 M5 COMPLETE — DLSS-SR prototype DONE.
+P2-5 verified (noise gone, no ghosting, no pitch issues; mvecScale inversion was the
+root cause). P2-4 verified (camera-cut reset). The ONLY remaining pre-ship item is
+P2-6: human reads `streamline-sdk-v2.12.0/license.txt` + the redistribution terms for
+sl.interposer.dll / nvngx_dlss.dll before publishing the mod (Risk 3). NEXT ENGINEERING
+WORK: Phase 3 frame generation — backlog fully specified below (P3-1…P3-7), start at
+P3-1 (swapchain/present routing). Commands: /dlssmc dlss | sl | mv | scale | mode |
+mvx | mvy | jx | jy.**
 `SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
 `VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's
 creation proxies (P2-1 collapsed into P2-2 as planned — SL adds extensions/features/
@@ -98,7 +80,7 @@ javadoc. Streamline SDK v2.12.0 extracted at repo root (gitignored — NVIDIA li
 - [x] **M2 — Resolution decoupling** — VISUALLY CONFIRMED (S3): half-res world upscaled to native, HUD crisp (2026-07-10).
 - [x] **M3 — Motion vectors (terrain)** — VERIFIED 2026-07-10: exact per-pixel terrain MVs (prepass) + camera fallback (sky/entities/translucents); overlay-verified incl. occlusion. Entity MVs deferred to P1-8 (post-DLSS, ghosting-guided). Gate-D bug hunt fixed: reverse-Z assumed depth, hand-FOV projection displacement, overlay scene re-draw ghosting, and the renderItemInHand depth-clear (velocity passes must run at LevelRenderer.render RETURN; **P2-3 note: DLSS depth tag must also be grabbed pre-clear**).
 - [x] **M4 — DLSS on** — **VERIFIED 2026-07-11**: Streamline manual-hooked via creation proxies; DLSS-SR upscaling live in-game (1280x685 → 2560x1369, MaxPerformance) on RTX 4070 SUPER / driver 596.49. Quality bar (ghosting/artifact tuning) is M5.
-- [ ] **M5 — Quality bar** — no gross ghosting; reset flag correct; prototype demo.
+- [x] **M5 — Quality bar** — **COMPLETE 2026-07-11**: no ghosting/noise/pitch artifacts (P2-5, mvecScale fix), reset flag on camera cuts (P2-4), DLSS-SR prototype fully playable.
 - [ ] **M6 — Frame generation (DLSS-G)** — FG live with Reflex; vsync mutually exclusive with FG; fps cap applies to RENDERED frames (presented = cap × FG factor); MFG pass-through (50-series only, untestable on dev HW).
 
 ---
@@ -136,7 +118,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 - [x] P2-1 ~~Inject extensions/features manually~~ — COLLAPSED into P2-2: SL's `vkCreateInstance`/`vkCreateDevice` proxies add all required extensions, features and queues (ManualHooking guide §4.2).
 - [x] P2-2 Streamline manual hooking — **RUNTIME-VERIFIED 2026-07-11**: `slIsFeatureSupported(kFeatureDLSS): SUPPORTED` on RTX 4070 SUPER / driver 596.49 / VK 1.4.329; device created via SL proxy (0x17769ac0b40, same handle captured by VulkanDeviceMixin); NGX loaded nvngx_dlss.dll v310.7.0 and set DLSS cubins (arch 0x190); game runs normally on Vulkan backend. Fix history: (a) iteration-1 crash root-caused below; (b) invokeExact ternary→Object WrongMethodTypeException in the enum bridge (typed local fixes it); (c) markChainBroken() guard added so partial proxy fallback can't recreate the crash. Note for P2-3: SL warns Vulkan hooks CmdBindPipeline/CmdBindDescriptorSets/BeginCommandBuffer "NOT supported" — expected with eDisableCLStateTracking, revisit only if slEvaluateFeature misbehaves. NGX used default app ID 100721531 + our projectId (cms id 876232c). Iteration-1 crash post-mortem: EXCEPTION_ACCESS_VIOLATION at pc=0x0 inside SL's vkCreateDevice, *after* extension merge. Cause (verified in SDK source `source/core/sl.interposer/vulkan/wrapper.cpp`): SL's post-create path does `s_vk.instance = instanceDeviceMap[physicalDevice]` (line 940); that map is only filled by SL's `vkEnumeratePhysicalDevices` hook (line 982), which Mojang bypassed → null instance → dispatch rebuilt from `vkGetInstanceProcAddr(NULL,…)` → plugin init calls null fn ptr. FIX: redirect `VK12.vkEnumeratePhysicalDevices` in `VulkanBackend.findPhysicalDevice` through the interposer too, and gate the whole proxied chain on `SlBridge.isInstanceProxied()` (all-or-nothing). LESSON: when using SL's creation proxies, EVERY interposer-intercepted entry point Mojang calls must be routed through SL (SL_INTERCEPT list, wrapper.cpp ~2360: GetInstance/DeviceProcAddr, Create/DestroyInstance, Create/DestroyDevice, EnumeratePhysicalDevices, QueuePresent, CreateImage, CmdPipelineBarrier, BeginCommandBuffer, swapchain fns, DeviceWaitIdle). Known residuals, likely fine for SR but check if weirdness: vkDestroyInstance/vkDestroyDevice not routed (backend restart would leave SL stale), vkCreateImage/vkCmdPipelineBarrier/vkBeginCommandBuffer not routed (may matter for P2-3 tagging). Awaiting Gate C iteration 2.
 - [x] P2-3 **RUNTIME-VERIFIED 2026-07-11**: `[DLSSmc] DLSS evaluate LIVE: 1280x685 -> 2560x1369` (MaxPerformance), per-frame evaluate running with no SL errors; visually confirmed upscaling (user-verified; known artifacts deferred to P2-5). One Gate-C iteration: slSetTagForFrame returned 19 (eErrorInvalidIntegration) because the `eUseFrameBasedResourceTagging` preference flag (1<<7) wasn't set at slInit — SL hard-requires it for the frame-based tagging API (sl.cpp). Design notes below still accurate: `DlssEvaluator` records token→slSetConstants→slSetTagForFrame→slEvaluateFeature→vkCmdCopyImage at **LevelRenderer.render RETURN** (depth intact, velocity just written) into a transient cmd buffer via public `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()`/`execute()` (execute closes Mojang's open buffer first → ordering world→eval→hand/HUD is exact; P1-3 resolved with zero mixins). Facts baked in: renderpearl keeps ALL images in VK_IMAGE_LAYOUT_GENERAL forever (Resource.state=1 always); RenderTarget textures are usage 15 (SAMPLED+ATTACH+COPY src/dst) so level color/depth + MV tag directly; renderpearl has NO STORAGE usage bit → DLSS output is our own raw LWJGL-created RGBA8 STORAGE VkImage, copied into native color after eval. Constants: clipToPrevClip = DlssMotion.reprojectionMatrix() verbatim; JOML column-major raw = SL row-major transpose (write as-is); depthInverted=true (REVERSE-Z), cameraMotionIncluded=true, MVs unjittered/undilated, mvecScale={renderW,renderH} (buffer is UV-space cur→prev — sign/scale is the P2-5 knob); reset wired to DlssJitter.requestReset (P2-4 hook exists). Early-restore design: on eval success the main target is restored BEFORE renderItemInHand (duck iface `DlssTargetAccess` on GameRendererMixin) → hand+HUD at native res over DLSS output, depth-clear hazard gone, NEAREST blit auto-skipped (savedTarget nulled). useAutoExposure=eTrue (no exposure tag; LDR colorBuffersHDR=eFalse). Failure latches `broken` → NEAREST blit fallback; `/dlssmc dlss` toggles + clears latch.
-- [~] P2-4 Reset flag — CODED 2026-07-11: camera-cut detector in `DlssMotion.capture` (level identity swap or >8-block/frame jump → requestReset + re-prime). Awaiting Gate D portal//tp/respawn test (**S7**).
+- [x] P2-4 Reset flag — **DONE, user-verified 2026-07-11**: camera-cut detector in `DlssMotion.capture` (level identity swap or >8-block/frame jump → requestReset + re-prime, zero MVs on cut frame) (**S7**).
 - [x] P2-5 Artifact tuning — **COMPLETE 2026-07-11**: translation noise solved (mvecScale inversion); user-verified no entity ghosting and no pitch issues at defaults (mvSign=(1,-1), jitterSign=(1,1), auto mode). P1-8 entity MVs not needed for the quality bar.
 - [ ] P2-6 **[!] Human:** read NVIDIA Streamline SDK EULA in the release zip; resolve redistribution before shipping (**Risk 3**).
 
