@@ -6,7 +6,7 @@
 > decisions.
 
 **Pinned target:** `26.3-snapshot-3` · **Toolchain:** JDK 25, Loader 0.19.3, Loom
-1.17-SNAPSHOT, Fabric API 0.154.3+26.3 · **Last updated:** 2026-07-10
+1.17-SNAPSHOT, Fabric API 0.154.3+26.3 · **Last updated:** 2026-07-11
 
 ---
 
@@ -21,9 +21,11 @@ P2-5 verified (noise gone, no ghosting, no pitch issues; mvecScale inversion was
 root cause). P2-4 verified (camera-cut reset). The ONLY remaining pre-ship item is
 P2-6: human reads `streamline-sdk-v2.12.0/license.txt` + the redistribution terms for
 sl.interposer.dll / nvngx_dlss.dll before publishing the mod (Risk 3). NEXT ENGINEERING
-WORK: Phase 3 frame generation — read [`FRAMEGEN_BRIEF.md`](./FRAMEGEN_BRIEF.md)
-FIRST (full implementation spec: API GUIDs/offsets, SL_INTERCEPT list, staged plan
-FG-1…FG-7, process rules), then the P3 backlog below. Commands: /dlssmc dlss | sl | mv | scale | mode |
+WORK: Phase 3 frame generation — [`FRAMEGEN_BRIEF.md`](./FRAMEGEN_BRIEF.md) read;
+**FG-1 swapchain recon COMPLETE 2026-07-11 (findings under Phase 3 below)**; next is
+FG-2 (add Reflex/PCL/DLSS_G to slInit featuresToLoad), then FG-3 swapchain routing.
+The P3 backlog and staged FG-1…FG-7 plan (API GUIDs/offsets, SL_INTERCEPT list) live in
+the brief. Commands: /dlssmc dlss | sl | mv | scale | mode |
 mvx | mvy | jx | jy.**
 `SlBridge` (FFM/Panama binding of `sl.interposer.dll`) + `VulkanInstanceMixin` /
 `VulkanBackendMixin` redirect Mojang's `vkCreateInstance`/`vkCreateDevice` through SL's
@@ -128,7 +130,57 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs hum
 > Sources: `streamline-sdk-v2.12.0/docs/ProgrammingGuideDLSS_G.md` (+ Reflex guide).
 > Same discipline as Phase 2: SL interposer routing is ALL-OR-NOTHING (P2-2 lesson).
 
-- [ ] P3-1 **Swapchain/present routing** — the piece deliberately skipped in P2-2: mixin-redirect ALL of Mojang's `vkCreateSwapchainKHR` / `vkGetSwapchainImagesKHR` / `vkAcquireNextImageKHR` / `vkQueuePresentKHR` / destroy + the resize-recreate path through SL's proxies (FG injects generated frames at present via its replacement swapchain). Biggest risk item; expect P2-2-style crash iterations, esp. on resize/F11.
+**FG-1 SWAPCHAIN RECON — COMPLETE 2026-07-11 (read from decompiled `-sources.jar`).**
+
+- **Swapchain owner = ONE class:** `com.mojang.renderpearl.backend.vulkan.VulkanGpuSurface`
+  (implements `GpuSurfaceBackend`). Holds ALL swapchain state: `long swapchain`,
+  `LongList swapchainImages` (RAW VkImage handles — NOT wrapped in renderpearl
+  textures), `swapchainImageFormat` (picks colorSpace 0 + VkFormat 37 or 44),
+  `swapchainWidth/Height`, `acquireSemaphores[2]` (ping-pong) + `presentSemaphores[per
+  image]`, `VkQueue presentQueue = device.graphicsQueue().vkQueue()`, `long surface`.
+  This is the ONLY FG-3 mixin target.
+- **The 5 KHR call sites (all in VulkanGpuSurface, via `org.lwjgl.vulkan.KHRSwapchain.*`
+  static; device arg = `this.device.vkDevice()` except present = `this.presentQueue`):**
+  - `configure(GpuSurface.Configuration)`: `vkCreateSwapchainKHR` @222;
+    `vkGetSwapchainImagesKHR` @225 (count) + @229 (images); calls `destroySwapchain()`
+    at head. minImageCount=max(3,caps.min); imageUsage=2 (TRANSFER_DST).
+  - `destroySwapchain()`: `vkDestroySwapchainKHR` @166 (graphicsQueue.waitIdle() first);
+    called by `configure()` head AND `close()`.
+  - `acquireNextTexture()`: `vkAcquireNextImageKHR` @280 (5 s timeout, binary
+    acquireSemaphore); handles OUT_OF_DATE(-1000001004)/SUBOPTIMAL(1000001003).
+  - `present()`: `vkQueuePresentKHR` @413 on presentQueue (waits presentSemaphores[img]).
+- **Resize/recreate driver = `Minecraft.renderFrame(boolean advanceGameTime)` @1279.**
+  If `windowSurfaceNeedsReconfiguring || (isSuboptimal && !surfaceIsInvalid)`: reads GLFW
+  framebuffer size → builds `GpuSurface.Configuration(w,h,presentMode)` →
+  `windowSurface.configure(config)` @1300 (destroy+create). `invalidateSurfaceConfiguration()`
+  @3020 sets the flag; triggered by the vsync option (`Options.java:506`), window resize,
+  and @1496. **Per-frame order in renderFrame:** configure(if needed) → `acquireNextTexture`
+  @1313 → [render] → `blitFromTexture(mainRenderTarget color)` @1392 → submit → `present`
+  @1408 → FramerateLimiter @1420.
+- **Present-mode / vsync selection:** `GpuSurface.PresentMode.getSupportedVsyncMode(
+  supported, options.enableVsync().get())` @Minecraft:1294. vsync ON → prefer
+  {FIFO_RELAXED, FIFO}; OFF → {IMMEDIATE, MAILBOX, FIFO}; → `VulkanConst.toVk()` →VK enum
+  @VulkanGpuSurface:208. **FG-6 hook:** force vsync off by `options.enableVsync().set(false)`
+  + `invalidateSurfaceConfiguration()` (restore prior value on FG off). NOTE:
+  `Minecraft.java:945` already does `enableVsync().set(false)` in one path — check it.
+- **Image wrapping:** final frame color is blitted (`vkCmdBlitImage`, Y-flip via offsets)
+  from `gameRenderer.mainRenderTarget().getColorTextureView()` into the acquired raw
+  swapchain image (`blitFromTexture` @VulkanGpuSurface:302) — the SAME native target our
+  DLSS-SR output already lands in.
+- **FPS limiter = `net.minecraft.client.FramerateLimiter.limitDisplayFPS(int)`** — called
+  in `renderFrame` @1420 AFTER `present()`, only if `framerateLimit < 260` (value from
+  `FramerateLimitTracker.getFramerateLimit()` @1344 → `gameRenderState().framerateLimit`).
+  Mechanism: `LockSupport.parkNanos`/`Thread.onSpinWait` busy-wait on the render thread to
+  hit target frame time. **Confirms FG-6 policy is sound:** the limiter throttles the real
+  game loop and runs AFTER present, so it caps RENDERED frames and never sees SL's
+  generated presents (those are injected inside SL's replacement `vkQueuePresentKHR`).
+- **Frame-loop entry for FG-4 markers:** `Minecraft.runTick(boolean)` @1154 drives
+  renderFrame + sets framerateLimit @1344; `Minecraft.tick()` @1845 = 20 Hz sim. Marker
+  placement: `eSimulationStart/End` around tick, `eRenderSubmitStart/End` around
+  GameRenderer.render, `ePresentStart/End` around `present()`@1408, `slReflexSleep` at
+  runTick start.
+
+- [~] P3-1 **Swapchain/present routing** — **FG-1 recon DONE (findings above): target=`VulkanGpuSurface`, 5 KHR sites mapped.** The piece deliberately skipped in P2-2: mixin-redirect ALL of Mojang's `vkCreateSwapchainKHR` / `vkGetSwapchainImagesKHR` / `vkAcquireNextImageKHR` / `vkQueuePresentKHR` / destroy + the resize-recreate path through SL's proxies (FG injects generated frames at present via its replacement swapchain). Biggest risk item; expect P2-2-style crash iterations, esp. on resize/F11.
 - [ ] P3-2 **slInit features** — `featuresToLoad += kFeatureDLSS_G, kFeatureReflex, kFeaturePCL` (lazy slInit already precedes instance creation; proxies then add FG's extra device extensions/queues automatically).
 - [ ] P3-3 **Reflex + PCL markers** — HARD requirement (FG refuses to run without): per-frame `eSimulationStart/End`, `eRenderSubmitStart/End`, `ePresentStart/End` markers whose frame indices match the Constants frame token EXACTLY (guide: "common constants cannot be found for frame N" = marker/token desync). Needs mixins in Minecraft's frame loop — new territory outside the render graph.
 - [ ] P3-4 **Present-lifecycle tags** — depth + MV currently `eValidUntilEvaluate`; FG consumes at PRESENT time → stable copies tagged `eValidUntilPresent` (velocity target is rewritten next frame). Tag **HUD-less color** (critical for quality per guide §5.2) — we already have the exact buffer: native target right after the DLSS copy, before hand/HUD (early-restore point) — one extra copy. UI-Alpha deferred: MC has no HUD alpha buffer; proper fix = render HUD offscreen RGBA + composite; v1 accepts HUD shimmer on generated frames.
