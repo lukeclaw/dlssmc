@@ -43,9 +43,30 @@ public final class DlssMotion {
     private static double prevCamX, prevCamY, prevCamZ;
     private static boolean primed = false;
     private static long frame = 0;
+    /** P2-4: level identity + jump threshold for camera-cut detection. */
+    private static Object lastLevel;
+    private static final double RESET_JUMP_SQ = 8.0 * 8.0; // blocks^2 per frame
 
     /** Capture this frame's unjittered view-proj + camera position; shift the previous. */
-    public static void capture(CameraRenderState camera) {
+    public static void capture(CameraRenderState camera, Object level) {
+        // P2-4: camera-cut detection. A level swap (portal/respawn/rejoin) or an
+        // implausible one-frame jump (>8 blocks: teleport/pearl — legit movement is
+        // <1 block/frame even sprint-elytra) means DLSS history is from a different
+        // view. Request the reset flag and re-prime so prev==cur this frame (zero MVs,
+        // consistent with the reset).
+        if (primed) {
+            double dx = camera.pos.x - curCamX;
+            double dy = camera.pos.y - curCamY;
+            double dz = camera.pos.z - curCamZ;
+            if (level != lastLevel || dx * dx + dy * dy + dz * dz > RESET_JUMP_SQ) {
+                DlssJitter.requestReset();
+                primed = false;
+                DLSSmc.LOGGER.info("[DLSSmc] camera cut ({}) — DLSS history reset requested",
+                        level != lastLevel ? "level change" : "position jump");
+            }
+        }
+        lastLevel = level;
+
         prevViewProj.set(curViewProj);
         prevCamX = curCamX; prevCamY = curCamY; prevCamZ = curCamZ;
 

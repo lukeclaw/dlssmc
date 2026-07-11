@@ -192,23 +192,18 @@ Screenshots or a short clip while moving:
 
 ---
 
-## What Claude needs from THIS iteration (M5 / P2-5 iter 3 — mvecScale inversion fix)
+## What Claude needs from THIS iteration (P2-4 — reset flag on camera cuts)
 
-**Iter-2 result: y-flip alone didn't help — real bug found: mvecScale convention was
-INVERTED** (it *normalizes* MVs into [-1,1], sl_consts.h:203; we sent {renderW,renderH}
-= MVs ~1000× too large; our UV-space buffer is already normalized → unity). Fix:
-mvecScale = {±1, ±1}, signs live-tunable.
+**P2-5 / the M5 quality bar is COMPLETE (user-verified 2026-07-11).** This iteration
+adds camera-cut detection so DLSS drops stale history on teleports.
 
-1. **Gate B:** `.\gradlew.bat build runClient` — paste the first `error:` block if any.
-2. **Gate D:** Vulkan, load a world:
-   - **Walk / strafe / sprint-and-release** over detailed ground — noise swaths and
-     the deceleration burst should be gone or hugely reduced.
-   - **A/B the y sign:** `/dlssmc mvy` toggles (default −1). One of the two should be
-     clearly better while walking — say which readout wins.
-   - **Pitch test:** look up/down fast, both mvy signs — the wrong sign should smear
-     vertically now that magnitudes are sane.
-   - Screenshot each + one line.
-3. Then: moving-entity ghosting (P1-8 gauge), useAutoExposure, P2-4 reset hooks.
+1. **Gate B:** `.\gradlew.bat build runClient`.
+2. **Gate D:**
+   - Walk through a **nether portal**, `/tp` somewhere far, or die and respawn.
+   - Expect: log line `[DLSSmc] camera cut (...) — DLSS history reset requested` and
+     **no one-frame smear** of the old scene on arrival.
+   - Sanity: normal play (sprinting, flying) should NEVER log a cut.
+3. After this, the only ships gate left is **P2-6** (read the Streamline EULA — human).
 
 ---
 

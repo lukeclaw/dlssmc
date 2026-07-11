@@ -7,6 +7,7 @@ import com.jhp.client.dlss.DlssResolution;
 import com.jhp.client.dlss.DlssVelocity;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.state.GameRenderState;
 import org.joml.Matrix4f;
@@ -73,7 +74,8 @@ public abstract class GameRendererMixin implements com.jhp.client.dlss.DlssTarge
     @Inject(method = "renderLevel", at = @At("HEAD"), require = 1)
     private void dlssmc$onRenderLevelHead(CallbackInfo ci) {
         DlssJitter.beginLevelFrame();
-        DlssMotion.capture(this.gameRenderState.levelRenderState.cameraRenderState);
+        DlssMotion.capture(this.gameRenderState.levelRenderState.cameraRenderState,
+				Minecraft.getInstance().level);
         if (DlssResolution.enabled()) {
             RenderTarget real = this.mainRenderTarget;
             TextureTarget level = DlssResolution.ensureLevelTarget(real.width, real.height);
