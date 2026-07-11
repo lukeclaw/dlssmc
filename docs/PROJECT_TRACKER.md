@@ -63,11 +63,45 @@
   geometry pass lives in `LevelRenderer.addMainPass` / `executeSolid` /
   `executeClassicTransparency`; shipped shaders to extend: `terrain.vsh/.fsh`,
   `block.vsh/.fsh`.
-  **Next: slice 2 (MRT terrain velocity):** extract those 4 shader sources, then
-  (1) index-1 RG16F `ColorTargetState` on the terrain pipelines, (2) velocity output in
-  their FS (camera-only reprojection from the VS world pos), (3) 2nd color attachment on
-  the main pass's render-pass creation, (4) verify via the `/dlssmc mv` overlay, then
-  drop `ASSUMED_DEPTH`.
+  **Slice 2 IN PROGRESS:** `terrain_velocity.vsh/.fsh` written (copies of the extracted
+  vanilla terrain shaders + `DlssReprojection` std140 block with unjittered
+  cur/prevT view-proj; clip positions interpolated, divide in FS; velocity at
+  `layout(location=1)`; jittered gl_Position kept — DLSS wants jitter-free MVs).
+  **ARCHITECTURE PIVOT after Gate A3 (2026-07-10):** in-main-pass MRT rejected — Vulkan
+  dynamic rendering requires every pipeline in the pass to declare matching attachment
+  counts, and the main pass hosts unbounded pipelines (entities/particles/outlines/...).
+  **Velocity PREPASS instead:** (1) slice-1 fullscreen pass fills the target
+  (camera-only fallback for sky/entities/translucents); (2) re-draw OPAQUE terrain into
+  the RG16F target via `ChunkSectionsToRender.renderGroup(OPAQUE, ourPass, ...)` with
+  velocity-variant pipelines (built from `TERRAIN_SNIPPET`, single RG16F color target),
+  reusing the LEVEL target's depth (test-equal semantics, no writes needed) for exact
+  occlusion; (3) capture `ChunkSectionsToRender` + the jittered projection slice at
+  `lambda$addMainPass$0` HEAD (they're its params); (4) substitute pipelines via a
+  RenderPass.setPipeline mixin flag-scoped to OUR pass only. Zero Mojang pipeline/pass
+  modifications; extends to entities in P1-8.
+  Key A3 findings (`docs/javap_a3_dump.txt`, `javap_levelrenderer_c.txt`): main pass =
+  first `createRenderPass` (5-arg) in `lambda$addMainPass$0` → `bindDefaultUniforms` →
+  `executeSolid` → `renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, chunkLayerSampler,
+  boolean)`; `BindGroupLayout.builder().withUniform(String, UniformType)`;
+  `RenderPipeline.builder(Snippet...)`; `RenderPassDescriptor.builder()` exists for MRT
+  if ever needed.
+  **RECON SELF-SUFFICIENT (2026-07-10):** discovered Loom's decompiled
+  `-sources.jar` inside `.gradle/loom-cache` in the mounted folder — Claude now reads
+  Mojang source directly (extracted to sandbox /tmp/mcsrc); javap gates A/A2/A3/A4 are
+  OBSOLETE. Human is only needed for Gate B (build) and C/D (run) from here on.
+  **Slice 2 CODED (prepass implementation):** `DlssTerrainVelocity` replays Mojang's
+  per-frame `ChunkSectionsToRender` draw data (public record accessors) for the OPAQUE
+  group into the RG16F target: pipeline = `builder(TERRAIN_SNIPPET)` + our shaders +
+  `ALPHA_CUTOUT=0.5` + custom `DlssReprojection` BindGroupLayout (UNIFORM_BUFFER, two
+  mat4s via `Std140Builder`) + RG16F color target + `DepthStencilState(GEQUAL, false)`
+  (vanilla is reverse-Z; level depth attached read-only → exact occlusion).
+  Capture via new `LevelRendererMixin` @ `executeSolid` HEAD (signature source-verified);
+  prepass runs at renderLevel RETURN after the slice-1 fullscreen fallback (layering:
+  camera-only for sky/entities/translucents, exact for terrain). Shaders rewritten as
+  single-output velocity (prepass has one attachment, not MRT).
+  **Next: Gate B → C → D** (expect: /dlssmc mv shows terrain velocity snapping to
+  geometry, incl. correct parallax during strafing; entities still camera-only until
+  P1-8).
 - **Blocked/awaiting human:** Gate A2 + Gate B on the dev machine; Task **P2-6** (license
   read); Vulkan-capable dev instance for Gates C/D.
 
@@ -78,7 +112,7 @@
 - [x] **M0 — Environment & recon** — template scaffolded, snapshot jar resolved, risks spiked.
 - [x] **M1 — Handles + jitter** — device+queue captured (S1) and jitter applied with correct Halton offsets (S2), both runtime-verified 2026-07-10.
 - [x] **M2 — Resolution decoupling** — VISUALLY CONFIRMED (S3): half-res world upscaled to native, HUD crisp (2026-07-10).
-- [ ] **M3 — Motion vectors** — correct per-pixel MVs for chunks + entities (debug-viz verified).
+- [x] **M3 — Motion vectors (terrain)** — VERIFIED 2026-07-10: exact per-pixel terrain MVs (prepass) + camera fallback (sky/entities/translucents); overlay-verified incl. occlusion. Entity MVs deferred to P1-8 (post-DLSS, ghosting-guided). Gate-D bug hunt fixed: reverse-Z assumed depth, hand-FOV projection displacement, overlay scene re-draw ghosting, and the renderItemInHand depth-clear (velocity passes must run at LevelRenderer.render RETURN; **P2-3 note: DLSS depth tag must also be grabbed pre-clear**).
 - [ ] **M4 — DLSS on** — Streamline manual-hooked; DLSS SR upscaling live.
 - [ ] **M5 — Quality bar** — no gross ghosting; reset flag correct; prototype demo.
 
@@ -154,51 +188,4 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-07-10 | Pin `26.3-snapshot-3`; bump deliberately. | Vulkan internals change weekly (PRD §7). |
-| 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a clean Vulkan backend. |
-| 2026-07-10 | Streamline **manual hooking**, not interposer. | Minecraft owns `vkCreateDevice`; SL supports app-owned devices via `slSetVulkanInfo`. |
-| 2026-07-10 | Build our own motion vectors. | Spike R1: no MV/TAA infra exists in 26.3-snapshot-3. |
-| 2026-07-10 | DLSS **SR only** for v1 (no FG/RR/Reflex). | Scope control for prototype. |
-| 2026-07-10 | Git DB in sandbox `/tmp`, work-tree on the mount; export `.bundle` for persistence. | Cowork mount blocks file deletion, which breaks an in-place `.git`. |
-| 2026-07-10 | Jitter the **world** projection via `@ModifyArg` on `ProjectionMatrixBuffer.getBuffer(Matrix4f)` in `renderLevel`; retire the `Projection.getMatrix()` hook. | Source read showed the world uses `getBuffer(Matrix4f)` (no `getMatrix`); the old hook only jittered the HUD/item projection. `@ModifyArg` targets the exact world upload. |
-| 2026-07-10 | **P1-7 = Approach B (MRT velocity)**, staged: camera-only fullscreen pass first, then MRT terrain, then entities. | Depth is not sampleable (A is blocked on an unsolved depth-resolve); B is DLSS-canonical and extends to entities. The camera-only slice is depth-independent for rotation, so it stands up the target/UBO/pass/conventions with zero recon on geometry pipelines. |
-
----
-
-## Environment / setup state
-
-- Snapshot jar resolved by Loom: `.gradle/loom-cache/.../minecraft-clientOnly-66c3572c59-26.3-snapshot-3.jar`.
-- `build.gradle` / `gradle.properties` already match the brief (no Yarn line; Loom id
-  `net.fabricmc.fabric-loom`; Java 25; Mixin `JAVA_25`).
-- **Still required on the real dev machine (cannot be done in this sandbox):**
-  - JDK 25 (Temurin) + IntelliJ 2025.3+.
-  - `./gradlew genSources` to browse decompiled source & confirm descriptors.
-  - NVIDIA RTX GPU + driver with Vulkan 1.2 (dynamic rendering + push descriptors).
-  - `./gradlew runClient`, then enable Video Settings → Graphics → "Prefer Vulkan (Experimental)".
-  - Download NVIDIA Streamline SDK release zip (registration) and read its EULA.
-
----
-
-## Git & cross-session persistence
-
-The Cowork folder mount blocks file **deletion**, which breaks an in-place `.git`
-(lock files can't be cleaned up). Workaround in use:
-
-- Git database lives at `/tmp/dlssmc.git` in the sandbox; work-tree is this folder.
-- History is exported to **`dlssmc-history.bundle`** in the repo root so it survives
-  across sessions and can be restored on the real machine.
-
-**To restore history on your machine (Windows, where delete works):**
-```
-# in an empty dir, or after removing the stub .git that the sandbox left behind:
-git clone dlssmc-history.bundle dlssmc
-# or, into an existing checkout:
-git bundle verify dlssmc-history.bundle
-git fetch dlssmc-history.bundle main:restored-main
-```
-> Note: the sandbox left a non-functional `.git/` stub in the folder that it could not
-> delete. On your machine, delete that folder and use the bundle (or just
-> `git init` fresh) — it does not affect the source files.
-
-**Next session with a live sandbox:** re-point git with
-`export GIT_DIR=/tmp/dlssmc.git GIT_WORK_TREE=<repo>` after restoring from the bundle,
-or re-init and continue.
+| 2026-07-10 | Vulkan backend only; OpenGL out of scope. | DLSS never supported GL; renderer has a cle
