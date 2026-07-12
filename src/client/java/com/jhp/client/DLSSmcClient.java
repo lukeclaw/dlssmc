@@ -3,6 +3,7 @@ package com.jhp.client;
 import com.jhp.DLSSmc;
 import com.jhp.client.dlss.DlssRenderState;
 import com.jhp.client.dlss.DlssResolution;
+import com.jhp.client.dlss.DlssBenchmark;
 import com.jhp.client.dlss.DlssEvaluator;
 import com.jhp.client.dlss.DlssVelocity;
 import com.jhp.client.dlss.SlBridge;
@@ -123,6 +124,16 @@ public class DLSSmcClient implements ClientModInitializer {
 							DlssEvaluator.jitterSignY = -DlssEvaluator.jitterSignY;
 							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
 							return 1;
+						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("bench").executes(ctx -> {
+							if (DlssBenchmark.isRunning()) {
+								DlssBenchmark.stop();
+								ctx.getSource().sendFeedback(Component.literal("[DLSSmc] benchmark stopped"));
+							} else {
+								DlssBenchmark.start();
+								ctx.getSource().sendFeedback(Component.literal("[DLSSmc] benchmark started - stand still, log will appear in game dir"));
+							}
+							return 1;
 						}))));
-	}
+					}
 }

@@ -1,5 +1,6 @@
 package com.jhp.client.mixin;
 
+import com.jhp.client.dlss.DlssBenchmark;
 import com.jhp.client.dlss.SlBridge;
 import net.minecraft.client.Minecraft;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,5 +34,6 @@ public abstract class MinecraftMixin {
     private void dlssmc$simEndRenderBegin(boolean advanceGameTime, CallbackInfo ci) {
         SlBridge.mark(SlBridge.PCL_SIMULATION_END);
         SlBridge.mark(SlBridge.PCL_RENDER_SUBMIT_START);
+        DlssBenchmark.onFrame();
     }
 }
