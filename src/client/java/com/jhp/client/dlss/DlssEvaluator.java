@@ -159,7 +159,13 @@ public final class DlssEvaluator {
             }
             ensureOutputImage(outWpx, outHpx);
 
-            long token = SlBridge.getNewFrameToken();
+            // FG-4: reuse the shared per-frame token (minted at runTick HEAD) so markers,
+            // constants and evaluate all carry the SAME frame index; fall back to a fresh
+            // token if the frame-loop mixin didn't run (e.g. SL-inactive path).
+            long token = SlBridge.currentFrameToken();
+            if (token == 0L) {
+                token = SlBridge.getNewFrameToken();
+            }
             if (token == 0L) {
                 return fail("slGetNewFrameToken returned null");
             }

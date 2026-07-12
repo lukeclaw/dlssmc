@@ -107,15 +107,22 @@ public abstract class VulkanGpuSurfaceMixin {
                     target = "Lorg/lwjgl/vulkan/KHRSwapchain;vkQueuePresentKHR(Lorg/lwjgl/vulkan/VkQueue;Lorg/lwjgl/vulkan/VkPresentInfoKHR;)I"),
             require = 1)
     private int dlssmc$queuePresentViaStreamline(VkQueue queue, VkPresentInfoKHR pPresentInfo) {
-        if (SlBridge.isInstanceProxied()) {
-            try {
-                return SlBridge.vkQueuePresentKHR(queue.address(), pPresentInfo.address());
-            } catch (Throwable t) {
-                DLSSmc.LOGGER.error("[DLSSmc] Streamline vkQueuePresentKHR threw; falling back to vanilla", t);
-                SlBridge.markChainBroken("vkQueuePresentKHR threw");
+        // FG-4: bracket the real present submission with PCL markers (shared frame token).
+        SlBridge.mark(SlBridge.PCL_RENDER_SUBMIT_END);
+        SlBridge.mark(SlBridge.PCL_PRESENT_START);
+        try {
+            if (SlBridge.isInstanceProxied()) {
+                try {
+                    return SlBridge.vkQueuePresentKHR(queue.address(), pPresentInfo.address());
+                } catch (Throwable t) {
+                    DLSSmc.LOGGER.error("[DLSSmc] Streamline vkQueuePresentKHR threw; falling back to vanilla", t);
+                    SlBridge.markChainBroken("vkQueuePresentKHR threw");
+                }
             }
+            return KHRSwapchain.vkQueuePresentKHR(queue, pPresentInfo);
+        } finally {
+            SlBridge.mark(SlBridge.PCL_PRESENT_END);
         }
-        return KHRSwapchain.vkQueuePresentKHR(queue, pPresentInfo);
     }
 
     @Redirect(

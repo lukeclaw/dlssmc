@@ -58,6 +58,18 @@ public final class SlBridge {
 
     public static final int SL_OK = 0;
     public static final int K_FEATURE_DLSS = 0;
+    // FG-2: frame-generation feature set (sl_core_types.h).
+    public static final int K_FEATURE_REFLEX = 3;
+    public static final int K_FEATURE_PCL = 4;
+    public static final int K_FEATURE_DLSS_G = 1000;
+    // FG-4 PCL markers (sl_pcl.h PCLMarker) + Reflex mode (sl_reflex.h ReflexMode)
+    public static final int PCL_SIMULATION_START = 0;
+    public static final int PCL_SIMULATION_END = 1;
+    public static final int PCL_RENDER_SUBMIT_START = 2;
+    public static final int PCL_RENDER_SUBMIT_END = 3;
+    public static final int PCL_PRESENT_START = 4;
+    public static final int PCL_PRESENT_END = 5;
+    private static final int REFLEX_MODE_LOW_LATENCY = 1;
 
     /** (2<<48) | (12<<32) | (0<<16) | kSDKVersionMagic(0xfedc) — SDK v2.12.0. */
     private static final long SDK_VERSION = 0x0002_000C_0000_FEDCL;
@@ -84,6 +96,13 @@ public final class SlBridge {
     private static MethodHandle hVkAcquireNextImageKHR;
     private static MethodHandle hVkQueuePresentKHR;
     private static MethodHandle hVkDestroySwapchainKHR;
+    // FG-4 Reflex/PCL (resolved lazily via slGetFeatureFunction)
+    private static MethodHandle hReflexSetOptions;
+    private static MethodHandle hReflexSleep;
+    private static MethodHandle hPclSetMarker;
+    private static volatile long currentFrameToken;   // shared per-frame FrameToken* (FG-4)
+    private static boolean reflexOptionsSet;
+    private static boolean markerWarned;
     // P2-3 per-frame API
     private static MethodHandle hSlGetNewFrameToken;
     private static MethodHandle hSlSetConstants;
@@ -168,19 +187,16 @@ public final class SlBridge {
                     FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
             hVkEnumeratePhysicalDevices = linker.downcallHandle(find(sl, "vkEnumeratePhysicalDevices"),
                     FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS));
-            // FG-3: SL interposer exports the swapchain entry points (SL_INTERCEPT list,
-            // wrapper.cpp ~2330). Non-dispatchable handles (VkSwapchainKHR/Semaphore/Fence)
-            // are uint64 -> JAVA_LONG; dispatchable handles (VkDevice/VkQueue) are pointers.
             hVkCreateSwapchainKHR = linker.downcallHandle(find(sl, "vkCreateSwapchainKHR"),
-                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));         // (device, pCreateInfo, pAllocator, pSwapchain)
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
             hVkGetSwapchainImagesKHR = linker.downcallHandle(find(sl, "vkGetSwapchainImagesKHR"),
-                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS));        // (device, swapchain, pCount, pImages)
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS));
             hVkAcquireNextImageKHR = linker.downcallHandle(find(sl, "vkAcquireNextImageKHR"),
-                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, ADDRESS)); // (device, swapchain, timeout, semaphore, fence, pImageIndex)
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, ADDRESS));
             hVkQueuePresentKHR = linker.downcallHandle(find(sl, "vkQueuePresentKHR"),
-                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));                            // (queue, pPresentInfo)
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
             hVkDestroySwapchainKHR = linker.downcallHandle(find(sl, "vkDestroySwapchainKHR"),
-                    FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, ADDRESS));                       // (device, swapchain, pAllocator)
+                    FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, ADDRESS));
             // Per-frame API (P2-3). C++ references are pointers at the ABI level.
             hSlGetNewFrameToken = linker.downcallHandle(find(sl, "slGetNewFrameToken"),
                     FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));           // (FrameToken*&, const uint32_t*)
@@ -249,9 +265,6 @@ public final class SlBridge {
     }
 
     // ---- FG-3 swapchain proxies (route Mojang's KHRSwapchain calls through SL) -----------
-    // Each takes native addresses/handles and passes typed locals (invokeExact matches on
-    // the static arg type; a ternary would be typed Object -> WrongMethodTypeException).
-
     public static int vkCreateSwapchainKHR(long deviceAddr, long pCreateInfoAddr,
             long pAllocatorAddr, long pSwapchainAddr) throws Throwable {
         MemorySegment alloc = pAllocatorAddr == 0L ? MemorySegment.NULL : MemorySegment.ofAddress(pAllocatorAddr);
@@ -299,14 +312,24 @@ public final class SlBridge {
             info.set(ADDRESS, 32, MemorySegment.NULL);                              // deviceLUID
             info.set(JAVA_INT, 40, 0);                                              // luidSize
             info.set(ADDRESS, 48, MemorySegment.ofAddress(vkPhysicalDeviceAddr));   // vkPhysicalDevice
-            int r = (int) hSlIsFeatureSupported.invokeExact(K_FEATURE_DLSS, info);
-            if (r == SL_OK) {
-                statusLine += "; DLSS SUPPORTED on this adapter";
-                DLSSmc.LOGGER.info("[DLSSmc] slIsFeatureSupported(kFeatureDLSS): SUPPORTED");
-            } else {
-                statusLine += "; DLSS NOT supported: sl::Result=" + r;
-                DLSSmc.LOGGER.warn("[DLSSmc] slIsFeatureSupported(kFeatureDLSS) -> sl::Result={} "
-                        + "(sl_result.h; 2=driver out of date, 4/5=no supported adapter)", r);
+            // FG-2: check every loaded feature so Gate C confirms DLSS-G availability.
+            int[] checkIds = { K_FEATURE_DLSS, K_FEATURE_DLSS_G, K_FEATURE_REFLEX, K_FEATURE_PCL };
+            String[] checkNames = { "kFeatureDLSS", "kFeatureDLSS_G", "kFeatureReflex", "kFeaturePCL" };
+            for (int i = 0; i < checkIds.length; i++) {
+                int featureId = checkIds[i];
+                int r = (int) hSlIsFeatureSupported.invokeExact(featureId, info);
+                if (r == SL_OK) {
+                    DLSSmc.LOGGER.info("[DLSSmc] slIsFeatureSupported({}): SUPPORTED", checkNames[i]);
+                    if (featureId == K_FEATURE_DLSS) {
+                        statusLine += "; DLSS SUPPORTED on this adapter";
+                    }
+                } else {
+                    DLSSmc.LOGGER.warn("[DLSSmc] slIsFeatureSupported({}) -> sl::Result={} "
+                            + "(sl_result.h; 2=driver out of date, 4/5=no supported adapter)", checkNames[i], r);
+                    if (featureId == K_FEATURE_DLSS) {
+                        statusLine += "; DLSS NOT supported: sl::Result=" + r;
+                    }
+                }
             }
         } catch (Throwable t) {
             DLSSmc.LOGGER.error("[DLSSmc] slIsFeatureSupported call failed", t);
@@ -368,6 +391,112 @@ public final class SlBridge {
         return (int) hDlssSetOptions.invokeExact(viewport, options);
     }
 
+    // ---- FG-4 frame token unification + Reflex/PCL markers -----------------------------
+
+    /** The one FrameToken* shared by markers, constants and evaluate this frame (0 if none). */
+    public static long currentFrameToken() {
+        return currentFrameToken;
+    }
+
+    /**
+     * Frame start (MinecraftMixin.runTick HEAD): mint ONE shared token, set Reflex
+     * low-latency once, sleep, and drop eSimulationStart. FG hard-requires the present
+     * marker's frame index to equal the Constants token index; sharing one token per frame
+     * guarantees it (guide: "common constants cannot be found for frame N").
+     */
+    public static void frameBegin() {
+        if (!isInstanceProxied()) {
+            currentFrameToken = 0L;
+            return;
+        }
+        try {
+            long token = getNewFrameToken();
+            currentFrameToken = token;
+            if (token == 0L) {
+                return;
+            }
+            if (!reflexOptionsSet) {
+                reflexOptionsSet = true;
+                reflexSetLowLatency();
+            }
+            reflexSleep(token);
+            pclSetMarker(PCL_SIMULATION_START, token);
+        } catch (Throwable t) {
+            DLSSmc.LOGGER.error("[DLSSmc] FG-4 frameBegin failed", t);
+        }
+    }
+
+    /** No-throw PCL marker on the current shared token; no-op if SL inactive or no token. */
+    public static void mark(int marker) {
+        long token = currentFrameToken;
+        if (token == 0L || !isInstanceProxied()) {
+            return;
+        }
+        try {
+            pclSetMarker(marker, token);
+        } catch (Throwable t) {
+            if (!markerWarned) {
+                markerWarned = true;
+                DLSSmc.LOGGER.error("[DLSSmc] slPCLSetMarker(marker={}) failed (logged once)", marker, t);
+            }
+        }
+    }
+
+    private static int reflexSleep(long token) throws Throwable {
+        if (hReflexSleep == null) {
+            hReflexSleep = resolveFeatureFn(K_FEATURE_REFLEX, "slReflexSleep",
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS));
+            if (hReflexSleep == null) {
+                return -1;
+            }
+        }
+        return (int) hReflexSleep.invokeExact(MemorySegment.ofAddress(token));
+    }
+
+    private static int pclSetMarker(int marker, long token) throws Throwable {
+        if (hPclSetMarker == null) {
+            hPclSetMarker = resolveFeatureFn(K_FEATURE_PCL, "slPCLSetMarker",
+                    FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS));
+            if (hPclSetMarker == null) {
+                return -1;
+            }
+        }
+        return (int) hPclSetMarker.invokeExact(marker, MemorySegment.ofAddress(token));
+    }
+
+    private static void reflexSetLowLatency() throws Throwable {
+        if (hReflexSetOptions == null) {
+            hReflexSetOptions = resolveFeatureFn(K_FEATURE_REFLEX, "slReflexSetOptions",
+                    FunctionDescriptor.of(JAVA_INT, ADDRESS));
+            if (hReflexSetOptions == null) {
+                return;
+            }
+        }
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment opts = a.allocate(48, 8);
+            writeHeader(opts, 0xf03af81a, (short) 0x6d0b, (short) 0x4902,
+                    new byte[] { (byte) 0xa6, 0x51, (byte) 0xc4, (byte) 0x96, 0x5e, 0x21, 0x54, 0x34 }, 1);
+            opts.set(JAVA_INT, 32, REFLEX_MODE_LOW_LATENCY);   // mode = eLowLatency
+            int r = (int) hReflexSetOptions.invokeExact(opts);
+            DLSSmc.LOGGER.info("[DLSSmc] slReflexSetOptions(eLowLatency) -> sl::Result={}", r);
+        }
+    }
+
+    /** Resolve an SL feature function pointer (slGetFeatureFunction) into a downcall handle. */
+    private static MethodHandle resolveFeatureFn(int feature, String name, FunctionDescriptor fd)
+            throws Throwable {
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment nm = a.allocateFrom(name);
+            MemorySegment pFn = a.allocate(ADDRESS);
+            int r = (int) hSlGetFeatureFunction.invokeExact(feature, nm, pFn);
+            if (r != SL_OK) {
+                DLSSmc.LOGGER.error("[DLSSmc] slGetFeatureFunction({}) -> sl::Result={}", name, r);
+                return null;
+            }
+            return Linker.nativeLinker().downcallHandle(MemorySegment.ofAddress(pFn.get(JAVA_LONG, 0)), fd);
+        }
+    }
+
     // ------------------------------------------------------------------------------------
 
     private static void fail(String why) {
@@ -420,8 +549,14 @@ public final class SlBridge {
         MemorySegment paths = arena.allocate(ADDRESS);
         paths.set(ADDRESS, 0, pathW);
 
-        MemorySegment features = arena.allocate(JAVA_INT);
-        features.set(JAVA_INT, 0, K_FEATURE_DLSS);
+        // FG-2: load DLSS-SR + Reflex + PCL + DLSS-G. SL's vkCreateDevice proxy adds
+        // each feature's extra device extensions/features/queues automatically.
+        int[] featureIds = { K_FEATURE_DLSS, K_FEATURE_REFLEX, K_FEATURE_PCL, K_FEATURE_DLSS_G };
+        MemorySegment features = arena.allocate((long) JAVA_INT.byteSize() * featureIds.length,
+                JAVA_INT.byteAlignment());
+        for (int i = 0; i < featureIds.length; i++) {
+            features.setAtIndex(JAVA_INT, i, featureIds[i]);
+        }
 
         MemorySegment prefs = arena.allocate(144, 8);
         writeHeader(prefs,
@@ -438,8 +573,8 @@ public final class SlBridge {
         prefs.set(ADDRESS, 80, logStub);                          // logMessageCallback
         prefs.set(JAVA_LONG, 88, FLAG_DISABLE_CL_STATE_TRACKING | FLAG_USE_MANUAL_HOOKING
                 | FLAG_USE_FRAME_BASED_RESOURCE_TAGGING);
-        prefs.set(ADDRESS, 96, features);                         // featuresToLoad = {kFeatureDLSS}
-        prefs.set(JAVA_INT, 104, 1);                              // numFeaturesToLoad
+        prefs.set(ADDRESS, 96, features);                         // featuresToLoad = {DLSS,Reflex,PCL,DLSS_G}
+        prefs.set(JAVA_INT, 104, featureIds.length);              // numFeaturesToLoad = 4 (FG-2)
         prefs.set(JAVA_INT, 108, 0);                              // applicationId (using projectId instead)
         prefs.set(JAVA_INT, 112, 0);                              // engine = eCustom
         prefs.set(ADDRESS, 120, arena.allocateFrom("26.3-snapshot-3"));   // engineVersion
