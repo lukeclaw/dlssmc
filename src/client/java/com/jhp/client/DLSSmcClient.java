@@ -13,16 +13,13 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 public class DLSSmcClient implements ClientModInitializer {
 
-	/** MV-Q tuning panel keybind (default K, rebindable in Controls -> Misc). */
-	public static final KeyMapping OPEN_PANEL = new KeyMapping(
-			"key.dlssmc.open_panel", GLFW.GLFW_KEY_K, KeyMapping.Category.MISC);
+	/** MV-Q tuning panel hotkey (K), polled via GLFW with edge detection. */
+	private static boolean panelKeyWasDown = false;
 
 	@Override
 	public void onInitializeClient() {
@@ -33,14 +30,18 @@ public class DLSSmcClient implements ClientModInitializer {
 				"[DLSSmc] client init - awaiting Vulkan device capture (deviceReady={})",
 				DlssRenderState.isDeviceReady());
 
-		// MV-Q tuning panel: register the K keybind and open the screen on press.
-		KeyBindingHelper.registerKeyBinding(OPEN_PANEL);
+		// MV-Q tuning panel: open on K (polled via GLFW, edge-detected). Gated on no screen
+		// open so it never fires while typing in chat/menus. (Rebindable-in-Controls would
+		// need the Fabric key-binding module, which is absent from this fabric-api build.)
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			while (OPEN_PANEL.consumeClick()) {
-				if (client.gui.screen() == null) {
-					client.gui.setScreen(new DlssTuningScreen());
-				}
+			if (client.getWindow() == null) {
+				return;
 			}
+			boolean down = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
+			if (down && !panelKeyWasDown && client.gui.screen() == null) {
+				client.gui.setScreen(new DlssTuningScreen());
+			}
+			panelKeyWasDown = down;
 		});
 
 		// Debug/settings toggles. This Fabric API build has no ClientCommandManager
