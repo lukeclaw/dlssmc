@@ -1,0 +1,299 @@
+@startuml
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam actorBackground #89b4fa
+skinparam participantBackground #313244
+skinparam sequenceMessageBackground #1e1e2e
+skinparam sequenceMessageBorder #6c7086
+skinparam arrowColor #cdd6f4
+skinparam actorBorderColor #89b4fa
+skinparam participantBorderColor #6c7086
+skinparam noteBackground #313244
+skinparam noteBorderColor #f9e2af
+skinparam noteFontColor #cdd6f4
+skinparam actorFontColor #1e1e2e
+skinparam participantFontColor #cdd6f4
+skinparam sequenceMessageFontColor #cdd6f4
+
+title DLSSmc — Full Architecture Sequence
+
+' ========================================================================
+' PARTICIPANTS
+' ========================================================================
+
+actor "Mojang\nVanilla" as VANILLA #585b70
+boundary "DLSSmcClient\n(Init)" as CLIENT #89b4fa
+boundary "DlssTuningScreen\n(GUI Panel)" as GUI #89b4fa
+participant "Minecraft\n(game loop)" as MC #f38ba8
+participant "GameRenderer" as GR #f9e2af
+participant "LevelRenderer" as LR #f9e2af
+collections "Mixin Layer" as MIXINS #a6e3a1
+database "DlssJitter\n(halton jitter)" as JITTER #89b4fa
+database "DlssMotion\n(camera state)" as MOTION #89b4fa
+database "DlssResolution\n(res decouple)" as RES #89b4fa
+database "DlssVelocity\n(fullscreen MV)" as VEL #89b4fa
+database "DlssTerrainVelocity\n(terrain prepass)" as TV #89b4fa
+database "DlssEvaluator\n(per-frame DLSS)" as EVAL #89b4fa
+database "DlssDebug\n(debug overlay)" as DEBUG #89b4fa
+control "SlBridge\n(FFM Panama)" as SL #cba6f7
+entity "sl.interposer.dll\n(NVIDIA Proxy)" as NATIVE #f5c2e7
+entity "Vulkan\n(renderpearl)" as VK #f5c2e7
+
+' ========================================================================
+' PHASE 1 — INITIALIZATION
+' ========================================================================
+
+== PHASE 1: INIT & VULKAN PROXY CHAIN ==
+
+CLIENT -> CLIENT : onInitializeClient()
+note right: DLSSmcClient\n(entrypoint)
+
+CLIENT -> MIXINS : register /dlssmc commands\nregister GLFW K key polling
+note right: DLSSmcClient.java\nK key -> DlssTuningScreen\nmv|dlss|sl|fg|scale|\nmode|preset|mvx|mvy|jx|jy
+
+VANILLA -> MIXINS : Minecraft boots,\nVulkanInstance.<init>
+note right: renderpearl startup
+
+MIXINS -> MIXINS : VulkanInstanceMixin\n@Redirect vkCreateInstance
+
+MIXINS -> SL : SlBridge.ensureInit()\n(lazy, called before\ninstance creation)
+note right: SlBridge.java:167
+
+SL -> SL : locate sl.interposer.dll\n(in streamline-sdk or\n-Ddlssmc.sl.dir)
+SL -> SL : SymbolLookup.libraryLookup()
+SL -> SL : bind all function exports\n(slInit, vkCreate*,\nper-frame API, FG API)
+SL -> SL : build sl::Preferences\nstruct (manual hooking,\nCL state tracking off,\nfeatures: DLSS+Reflex+PCL+DLSS_G)
+SL -> NATIVE : slInit(&prefs, SDK_VERSION)
+
+NATIVE --> SL : sl_result eOk
+
+SL --> MIXINS : state=ACTIVE
+
+MIXINS -> SL : SlBridge.vkCreateInstance(addr, addr)
+SL -> NATIVE : proxy vkCreateInstance
+NATIVE --> SL : VK_SUCCESS
+SL --> MIXINS : instanceProxied=true
+note right: SlBridge.java:247-248
+
+VANILLA -> MIXINS : VulkanBackendMixin\n@Redirect vkEnumeratePhysicalDevices
+
+MIXINS -> SL : SlBridge.vkEnumeratePhysicalDevices(addr, addr, addr)
+SL -> NATIVE : proxy vkEnumeratePhysicalDevices
+note right: Populates SL's\ninstanceDeviceMap\n(fixes pc=0 crash)
+
+VANILLA -> MIXINS : VulkanBackendMixin\n@Redirect vkCreateDevice
+
+MIXINS -> SL : SlBridge.vkCreateDevice(addr, addr, addr)
+SL -> NATIVE : proxy vkCreateDevice
+note right: SL adds DLSS\nextensions/features/queues
+
+NATIVE --> SL : VK_SUCCESS
+
+VANILLA -> MIXINS : VulkanDeviceMixin\n@Inject <init> TAIL
+
+MIXINS -> MIXINS : DlssRenderState.captureDevice()\nVkDevice + VkQueue + queueFamily
+note right: DlssRenderState.java\nSuccess criterion S1
+
+' ========================================================================
+' PHASE 2 — PER-FRAME RENDER PIPELINE
+' ========================================================================
+
+== PHASE 2: PER-FRAME RENDER LOOP ==
+
+loop every game tick
+
+  MC -> MIXINS : MinecraftMixin\n@Inject runTick HEAD
+
+  MIXINS -> SL : SlBridge.frameBegin()
+  note right: SlBridge.java:FG-4\nshared per-frame token
+
+  SL -> SL : getNewFrameToken()
+  SL -> SL : slReflexSetOptions\n(LowLatency)
+  SL -> NATIVE : slReflexSleep()
+  SL -> SL : PCL eSimulationStart
+
+  MC -> MIXINS : MinecraftMixin\n@Inject renderFrame HEAD
+
+  MIXINS -> SL : PCL_SIMULATION_END\nPCL_RENDER_SUBMIT_START
+
+  MC -> GR : renderLevel()
+
+  GR -> MIXINS : GameRendererMixin\n@Inject renderLevel HEAD
+
+  MIXINS -> JITTER : DlssJitter.beginLevelFrame()
+  note right: Open jitter scope
+
+  MIXINS -> MOTION : DlssMotion.capture(camera, level)
+  note right: DlssMotion.java:138\nStores current/prev\nview-projection matrices
+
+  MOTION -> MOTION : camera-cut detection\n(level change or >8 blocks)
+  MOTION -> JITTER : requestReset() if cut
+
+  MIXINS -> RES : ensureLevelTarget(nw, nh)
+  note right: DlssResolution.java:65\nCreates/resizes low-res\nTextureTarget (scale 0.5)
+
+  MIXINS -> MIXINS : @ModifyArg getBuffer(proj)\n→ DlssJitter.applyTo(proj, w, h)
+
+  MIXINS --> GR : (world render begins\nat low resolution)
+
+  GR -> LR : renderLevel()
+
+  LR -> MIXINS : LevelRendererMixin\n@Inject executeSolid HEAD
+
+  MIXINS -> TV : DlssTerrainVelocity.captureFrame(draws)
+  note right: DlssTerrainVelocity.java:213\nSnapshots chunk draw data\n+ uniform state
+
+  LR -> VK : executeSolid() (OPAQUE draw)
+
+  LR -> MIXINS : LevelRendererMixin\n@Inject render RETURN
+
+  note over MIXINS, VEL : VELOCITY PASSES
+
+  MIXINS -> VEL : DlssVelocity.render(w, h)
+  note right: DlssVelocity.java:167\nFullscreen RG16F velocity\nvia reprojection matrix
+
+  MIXINS -> TV : DlssTerrainVelocity.renderPrepass(tex, target)
+  note right: DlssTerrainVelocity.java:213\nReplays OPAQUE draws into\nvelocity target with\ncustom reprojection UBO
+
+  note over MIXINS, EVAL : DLSS EVALUATE
+
+  MIXINS -> EVAL : DlssEvaluator.evaluate(levelTarget, nativeTarget)
+  note right: DlssEvaluator.java:172
+
+  EVAL -> EVAL : initStructsOnce()
+  EVAL -> EVAL : sendOptionsIfNeeded(w, h)
+  EVAL -> EVAL : ensureOutputImage(w, h)
+
+  alt FG enabled
+    EVAL -> EVAL : depthCopy.ensure(inW, inH)\nmvCopy.ensure(velW, velH)\nhudlessCopy.ensure(outW, outH)
+    EVAL -> EVAL : transition + globalBarrier
+    EVAL -> EVAL : vkCmdCopyImage (depth)\nvkCmdCopyImage (MV)
+    note right: FG-5b stable copies\n(eValidUntilPresent)
+  end
+
+  EVAL -> SL : getNewFrameToken()\nor reuse currentFrameToken
+  note right: FG-4 shared token
+
+  EVAL -> EVAL : fillConstants(inW, inH)\n(unjittered matrices,\njitter offset, mvecScale,\ncamera-cut flag)
+
+  EVAL -> SL : slSetConstants(constants, token, viewport)
+  SL --> EVAL : SV_OK
+
+  EVAL -> EVAL : fillResourcesAndTags(levelTarget, nativeTarget, fg)
+  note right: 4 tags (no FG) or\n5 tags (FG: +HUD-less color)\ndepth|MV|input|output|hudless
+
+  EVAL -> SL : slSetTagForFrame(token, viewport, tags, num, cmdBuf)
+  SL --> EVAL : SV_OK
+
+  EVAL -> SL : slEvaluateFeature(kFeatureDLSS, token, inputs, 1, cmdBuf)
+  SL -> NATIVE : DLSS evaluate on GPU
+  NATIVE --> SL : SV_OK
+  SL --> EVAL : SV_OK
+
+  EVAL -> EVAL : vkCmdCopyImage (DLSS output -> native target)
+  alt FG enabled
+    EVAL -> EVAL : vkCmdCopyImage (HUD-less snapshot)
+  end
+
+  EVAL --> MIXINS : true (DLSS replaced blit)
+
+  MIXINS -> MIXINS : DlssTargetAccess.dlssmc$restoreNativeTarget()
+  note right: GameRendererMixin implements\nDlssTargetAccess duck interface\nEarly restore before hand+HUD
+
+  LR -> VK : renderItemInHand() at native res
+
+  GR -> MIXINS : GameRendererMixin\n@Inject renderLevel RETURN
+
+  MIXINS -> JITTER : DlssJitter.endLevelFrame()
+  alt DLSS succeeded
+    MIXINS --> GR : skip blit (DLSS owns output)
+  else
+    MIXINS --> GR : NEAREST blit (fallback)
+  end
+  MIXINS -> VEL : DlssVelocity.blitDebug()\n(if MV overlay on)
+
+  GR -> MIXINS : (render overlays, etc.)
+
+end
+
+' ========================================================================
+' PHASE 3 — SWAPCHAIN + FG PRESENT
+' ========================================================================
+
+== PHASE 3: SWAPCHAIN & FRAME GENERATION ==
+
+VK -> MIXINS : vkCreateSwapchainKHR\nvkGetSwapchainImagesKHR\nvkAcquireNextImageKHR\nvkDestroySwapchainKHR
+
+MIXINS -> SL : SlBridge.vkCreate* (all 5)
+note right: VulkanGpuSurfaceMixin.java\n@Redirect all 5 KHR calls\nGated on isInstanceProxied()
+
+SL -> NATIVE : proxy through interposer
+NATIVE --> SL
+SL --> MIXINS
+
+VK -> MIXINS : vkQueuePresentKHR
+
+MIXINS -> SL : SlBridge.vkQueuePresentKHR(addr)
+SL -> NATIVE : proxy vkQueuePresentKHR
+
+note over SL : FG-4 PCL PRESENT markers\nPCL_RENDER_SUBMIT_END\nPCL_PRESENT_START\nPCL_PRESENT_END
+
+SL -> SL : PCL_RENDER_SUBMIT_END
+SL -> NATIVE : (original present call)
+SL -> SL : PCL_PRESENT_START\nPCL_PRESENT_END
+
+' ========================================================================
+' PHASE 4 — TUNING & COMMANDS
+' ========================================================================
+
+== PHASE 4: USER TUNING ==
+
+actor "Player" as PLAYER
+
+PLAYER -> GUI : press K key\n(edge-detected, GLFW poll)
+
+GUI -> GUI : DlssTuningScreen\n(non-pausing Screen)
+
+PLAYER -> GUI : click buttons
+
+GUI -> EVAL : toggle dlss / mode / preset / scale
+GUI -> SL : toggle fg
+GUI -> VEL : toggle mv overlay
+
+note right of GUI : DlssTuningScreen.java:108\nButton-based controls:\nDLSS on/off | mode | preset\nscale | FG | MV overlay\nMV/jitter sign toggles\nSL status print
+
+PLAYER -> MIXINS : /dlssmc <cmd>
+
+MIXINS -> EVAL : mv / dlss / reset\n scale / mode / preset
+MIXINS -> VEL : mv (toggle debug)
+MIXINS -> SL : sl / fg (status)
+MIXINS -> EVAL : mvx/mvy/jx/jy\n(set sign knobs)
+
+' ========================================================================
+' FG FLOW (DETAIL)
+' ========================================================================
+
+== FG-4: FRAME GENERATION SUB-FLOW ==
+
+note over MC, SL : FG-4 shared token loop\n(runTick HEAD → render RETURN)
+
+SL -> NATIVE : slGetNewFrameToken()
+SL -> NATIVE : slReflexSetOptions(LowLatency)
+SL -> NATIVE : slReflexSleep()
+SL -> NATIVE : slPCLSetMarker(SimulationStart)
+
+...world renders...
+
+SL -> NATIVE : slPCLSetMarker(SimulationEnd)
+SL -> NATIVE : slPCLSetMarker(RenderSubmitStart)
+
+...DLSS evaluate with shared token...
+
+SL -> NATIVE : slPCLSetMarker(RenderSubmitEnd)
+SL -> NATIVE : vkQueuePresentKHR (proxied)
+SL -> NATIVE : slPCLSetMarker(PresentStart)
+SL -> NATIVE : slPCLSetMarker(PresentEnd)
+
+note over SL : FG-5b stable-copy images:\ndepthCopy (D32)\nmvCopy (RG16F)\nhudlessCopy (RGBA8)\nAll tagged eValidUntilPresent
+
+@enduml
