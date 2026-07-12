@@ -76,10 +76,11 @@ public final class DlssEvaluator {
     // ---- P2-5 runtime tuning knobs (/dlssmc mvx|mvy|jx|jy) ------------------------------
     // mvecScale is a NORMALIZER into [-1,1] (see fillConstants) — magnitude is unity;
     // only the SIGNS are tunable. The buffer stores (prevNdc - currNdc) * 0.5 in
-    // GL-style NDC (y-UP); if the consumed space is image-style y-DOWN the y sign must
-    // be negative (current default). Toggle live to A/B.
+    // GL-style NDC (y-UP). Gate-D A/B 2026-07-12 (user, AFTER the jitter-sign fix):
+    // mvSign (+,+) looks best — the old (+,-) default was tuned against inverted
+    // jitter, so its ranking was contaminated. Toggle live to A/B.
     public static volatile float mvSignX = 1f;
-    public static volatile float mvSignY = -1f;
+    public static volatile float mvSignY = 1f;
     /** Sign of the jitterOffset REPORTED to SL (applied matrix jitter unchanged).
      * MV-Q Gate-D A/B 2026-07-12 (user): (-,-) clearly sharpest — (+,+) had DLSS
      * un-jittering in the wrong direction, a permanent per-frame blur. */

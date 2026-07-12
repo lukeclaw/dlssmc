@@ -20,6 +20,8 @@
 complaint. THREE fixes: (1) **jitter sign inversion** — Gate-D A/B (user): jitterSign **(-,-)
 clearly sharpest**; (+,+) had DLSS un-jittering the wrong way = permanent per-frame blur.
 Default flipped in `DlssEvaluator` (this invalidates earlier preset-K/L/M rankings — re-sweep).
+Follow-up Gate-D A/B (post-jitter-fix): **mvSign (+,+) best** — the old (+,-) default was
+ranked against inverted jitter; default flipped in `DlssEvaluator` too.
 (2) **PHASE_COUNT 16 → dynamic 8/scale² (32 at 0.5)** in `DlssJitter` per the DLSS guide.
 (3) **terrain mip-LOD bias** (new `DlssMipBias` + `VulkanGpuSamplerMixin`): renderpearl
 hardcodes `mipLodBias(0.0F)` in `VulkanGpuSampler`; the redirect substitutes `log2(scale)+extra`
@@ -251,4 +253,4 @@ Raw native handle for SL = LWJGL `VkDevice.address()` / `VkQueue.address()`.
 | 2026-07-11 | P2-1 collapsed into P2-2 via SL creation proxies; swapchain/present hooks skipped. | ManualHooking guide §4.2: proxies add required extensions/features/queues; sl_hooks.h swapchain hooks only matter for Frame Generation (out of scope). |
 | 2026-07-11 | slInit lazily inside the vkCreateInstance redirect, not onInitializeClient. | Guaranteed to precede instance creation regardless of mod-loader init order; idempotent for backend restarts. |
 | 2026-07-11 | FG-3 commit had reverted FG-2's SlBridge edits (based on stale mounted-.git HEAD, not the off-mount commit); FG-4 restored them. | The in-sandbox mounted `.git` lags the off-mount commit repo; ALWAYS base file rewrites on the off-mount repo HEAD (`/tmp/dlssmc*.git`), not `git show HEAD` of the mount. FG-3 swapchain test was still valid (routing is feature-independent) but ran with only kFeatureDLSS loaded. |
-| 2026-07-11 | FG pacing: vsync mutually exclusive with FG; fps cap applies to rendered frames only (presented = cap × FG factor). | User decision. Vsync fights FG pacing (Reflex owns it); cap-on-real-frames preserves the intuitive "60 cap → 120 presented at 2×" behavior. |
+| 2026-07-11 | FG pacing: vsync mutually exclusive with FG; fps cap applies to rendered frames only (presented = c
