@@ -1,6 +1,7 @@
 package com.jhp.client.dlss;
 
 import com.jhp.DLSSmc;
+import com.jhp.client.dlss.SlBridge;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -76,12 +77,12 @@ public final class DlssBenchmark {
             DlssEvaluator.presetOverride = 11;
             DlssEvaluator.modeOverride = 3;
         }),
-        new Step("DLSS on, scale 0.667, mode=DLAA", () -> {
+        new Step("DLSS on, scale 0.667, mode=UltraPerf", () -> {
             DlssEvaluator.enabled = true;
             DlssEvaluator.reset();
             DlssResolution.scale = 0.667f;
             DlssEvaluator.presetOverride = 11;
-            DlssEvaluator.modeOverride = 6;
+            DlssEvaluator.modeOverride = 4;
         }),
         new Step("DLSS on, scale 0.5, preset K", () -> {
             DlssEvaluator.enabled = true;
@@ -89,6 +90,31 @@ public final class DlssBenchmark {
             DlssResolution.scale = 0.5f;
             DlssEvaluator.presetOverride = 11;
             DlssEvaluator.modeOverride = -1;
+        }),
+        // FG variants
+        new Step("DLSS on, scale 0.667, preset K, FG ON", () -> {
+            DlssEvaluator.enabled = true;
+            DlssEvaluator.reset();
+            DlssResolution.scale = 0.667f;
+            DlssEvaluator.presetOverride = 11;
+            DlssEvaluator.modeOverride = -1;
+            SlBridge.setFrameGeneration(true);
+        }),
+        new Step("DLSS on, scale 0.667, preset def, FG ON", () -> {
+            DlssEvaluator.enabled = true;
+            DlssEvaluator.reset();
+            DlssResolution.scale = 0.667f;
+            DlssEvaluator.presetOverride = 0;
+            DlssEvaluator.modeOverride = -1;
+            SlBridge.setFrameGeneration(true);
+        }),
+        new Step("DLSS on, scale 0.667, preset K, FG off (cleanup)", () -> {
+            DlssEvaluator.enabled = true;
+            DlssEvaluator.reset();
+            DlssResolution.scale = 0.667f;
+            DlssEvaluator.presetOverride = 11;
+            DlssEvaluator.modeOverride = -1;
+            SlBridge.setFrameGeneration(false);
         })
     );
 
