@@ -74,6 +74,16 @@ public class DLSSmcClient implements ClientModInitializer {
 									"[DLSSmc] DLSS mode override: " + DlssEvaluator.modeName(DlssEvaluator.modeOverride)));
 							return 1;
 						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("preset").executes(ctx -> {
+							// MV-Q: cycle DLSS preset default -> K -> L -> M to A/B fast-motion stability live.
+							DlssEvaluator.presetOverride = switch (DlssEvaluator.presetOverride) {
+								case 0 -> 11; case 11 -> 12; case 12 -> 13; default -> 0;
+							};
+							ctx.getSource().sendFeedback(Component.literal(
+								"[DLSSmc] DLSS preset override: " + DlssEvaluator.presetName(DlssEvaluator.presetOverride)
+								+ " (K/L transformer = most motion-stable; applies next frame)"));
+							return 1;
+						}))
 						// P2-5 live tuning knobs: flip a sign, watch the artifacts.
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("mvx").executes(ctx -> {
 							DlssEvaluator.mvSignX = -DlssEvaluator.mvSignX;

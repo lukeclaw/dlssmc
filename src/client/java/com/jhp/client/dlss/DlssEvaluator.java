@@ -99,10 +99,23 @@ public final class DlssEvaluator {
         };
     }
 
+    /**
+     * MV-Q: DLSS preset override (/dlssmc preset). 0 = eDefault (per-mode). Transformer
+     * presets K(11)/L(12) are far more motion-stable than the older per-mode defaults —
+     * the main lever for the fast-vector noise/smear. sl_dlss.h DLSSPreset.
+     */
+    public static volatile int presetOverride = 0;
+
+    public static String presetName(int p) {
+        return switch (p) {
+            case 10 -> "J"; case 11 -> "K"; case 12 -> "L"; case 13 -> "M"; default -> "default";
+        };
+    }
+
     /** Set true after an unrecoverable SL error; falls back to the NEAREST blit. */
     private static boolean broken = false;
     private static boolean optionsSent = false;
-    private static int optW, optH, optMode = -1;
+    private static int optW, optH, optMode = -1, optPreset = -1;
     private static String lastError = "none";
     private static long frames = 0;
 
@@ -147,7 +160,8 @@ public final class DlssEvaluator {
     /** P2-5 knob readout for the /dlssmc command feedback. */
     public static String knobs() {
         return "mvSign=(" + (int) mvSignX + "," + (int) mvSignY
-                + ") jitterSign=(" + (int) jitterSignX + "," + (int) jitterSignY + ")";
+                + ") jitterSign=(" + (int) jitterSignX + "," + (int) jitterSignY + ")"
+                + " preset=" + presetName(presetOverride);
     }
 
     /**
@@ -327,7 +341,7 @@ public final class DlssEvaluator {
     private static boolean sendOptionsIfNeeded(int outWpx, int outHpx) throws Throwable {
         int mode = modeOverride >= 0 ? modeOverride
                 : DlssResolution.scale <= 0.55f ? 1 /*eMaxPerformance*/ : 3 /*eMaxQuality*/;
-        if (optionsSent && optW == outWpx && optH == outHpx && optMode == mode) {
+        if (optionsSent && optW == outWpx && optH == outHpx && optMode == mode && optPreset == presetOverride) {
             return true;
         }
         MemorySegment o = DLSS_OPTIONS;
@@ -341,7 +355,7 @@ public final class DlssEvaluator {
         o.set(JAVA_BYTE, 57, (byte) 0);                // indicatorInvertAxisX
         o.set(JAVA_BYTE, 58, (byte) 0);                // indicatorInvertAxisY
         for (int off = 60; off <= 80; off += 4) {
-            o.set(JAVA_INT, off, 0);                   // all presets = eDefault
+            o.set(JAVA_INT, off, presetOverride);      // MV-Q: preset (0=eDefault,11=K,12=L,13=M)
         }
         o.set(JAVA_BYTE, 84, (byte) 1);                // useAutoExposure = eTrue (no exposure tag)
         o.set(JAVA_BYTE, 85, (byte) 0);                // alphaUpscalingEnabled
@@ -355,6 +369,7 @@ public final class DlssEvaluator {
         optW = outWpx;
         optH = outHpx;
         optMode = mode;
+        optPreset = presetOverride;
         return true;
     }
 
