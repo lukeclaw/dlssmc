@@ -415,7 +415,11 @@ public final class SlBridge {
      * guarantees it (guide: "common constants cannot be found for frame N").
      */
     public static void frameBegin() {
-        if (!isInstanceProxied()) {
+        // FG-4 machinery (shared token, Reflex sleep, PCL markers) is ONLY needed for frame
+        // generation. Running it every frame perturbs DLSS-SR temporal accumulation (Reflex
+        // re-pacing the CPU frame -> motion smearing), so gate it on FG being enabled. With
+        // FG off, DlssEvaluator falls back to getNewFrameToken() = exact M5 behaviour.
+        if (!isInstanceProxied() || !fgEnabled) {
             currentFrameToken = 0L;
             return;
         }
