@@ -32,9 +32,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *       into the native target before the HUD renders. Because {@code LevelRenderer}
  *       resolves its target via {@code gameRenderer.mainRenderTarget()}, this redirects
  *       the entire world render graph to the internal resolution.</li>
- *   <li><b>Motion vectors (P1-7):</b> slice-1 fullscreen camera velocity + slice-2
- *       terrain velocity prepass at {@code renderLevel} RETURN, plus the /dlssmc mv
- *       debug overlay composited onto the native target.</li>
+ *   <li><b>Motion vectors (P1-7):</b> depth-sampled fullscreen velocity pass at
+ *       {@code LevelRenderer.render} RETURN, plus the /dlssmc mv debug overlay
+ *       composited onto the native target.</li>
  * </ul>
  * The jitter's NDC scale reads {@code mainRenderTarget.width/height}, which is the
  * swapped (internal) target during {@code renderLevel}, so jitter auto-scales to the
@@ -87,9 +87,9 @@ public abstract class GameRendererMixin implements com.jhp.client.dlss.DlssTarge
     @Inject(method = "renderLevel", at = @At("RETURN"), require = 1)
     private void dlssmc$onRenderLevelReturn(CallbackInfo ci) {
         DlssJitter.endLevelFrame();
-        // NOTE: the velocity passes moved to LevelRendererMixin (render RETURN) —
+        // NOTE: the velocity pass runs in LevelRendererMixin (render RETURN) —
         // GameRenderer clears the level depth to far for renderItemInHand BEFORE
-        // renderLevel returns, which broke the prepass depth test here.
+        // renderLevel returns, so the depth-sampled pass must run before that clear.
         if (this.dlssmc$savedTarget != null) {
             RenderTarget real = this.dlssmc$savedTarget;
             TextureTarget level = DlssResolution.levelTarget();

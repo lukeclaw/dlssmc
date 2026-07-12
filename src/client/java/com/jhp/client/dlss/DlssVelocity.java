@@ -22,21 +22,17 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 
 /**
- * Motion-vector velocity target (P1-7, Approach B — slice 1: camera-only fallback).
+ * Motion-vector velocity target (P1-7, depth-sampled approach).
  *
- * <p>Owns the RG16-float velocity {@link TextureTarget} DLSS will consume, plus a
- * full-screen pass that fills it with <b>camera-only</b> velocity. The whole
- * reprojection chain — un-project current NDC (at an assumed far depth), shift by the
- * camera delta, re-project with the previous view-proj — is folded into a
- * <b>single matrix</b> on the CPU ({@link DlssMotion#reprojectionMatrix()});
- * perspective division's invariance under homogeneous scaling makes this exact. One
- * mat4 means the pass reuses Mojang's own {@link ProjectionMatrixBuffer} (std140
- * upload) and the stock {@code BindGroupLayouts.PROJECTION} layout — no custom UBO
- * plumbing. The shader block mirrors vanilla's {@code Projection / ProjMat} naming.</p>
- *
- * <p><b>Layering:</b> this pass runs first each frame as the fallback for sky,
- * entities, and translucents; the slice-2 terrain prepass ({@link DlssTerrainVelocity})
- * then overwrites terrain pixels with exact geometry velocity.</p>
+ * <p>Owns the RG16-float velocity {@link TextureTarget} DLSS consumes, plus a
+ * full-screen pass that fills it with per-pixel velocity by sampling the
+ * <b>level depth buffer</b>. The reprojection chain — un-project current NDC
+ * (using the actual depth from the buffer), shift by the camera delta,
+ * re-project with the previous view-proj — is folded into a single matrix
+ * ({@link DlssMotion#reprojectionMatrix()}); perspective division's invariance
+ * under homogeneous scaling makes this exact even without knowing clipW. This
+ * single pass replaces the old two-pass approach (camera-only fallback + terrain
+ * geometry prepass), eliminating the expensive opaque-geometry replay.</p>
  */
 public final class DlssVelocity {
     private DlssVelocity() {}
@@ -45,16 +41,6 @@ public final class DlssVelocity {
     public static volatile boolean enabled = true;
     /** Overlay the velocity target on screen (toggled by the /dlssmc mv client command). */
     public static volatile boolean showDebug = false;
-
-    /**
-     * Assumed NDC depth for the fullscreen fallback's un-projection. The renderer is
-     * REVERSE-Z (NDC z ~ near/distance), so "far away" means a SMALL z: 0.0002 with
-     * near=0.05 is ~250 blocks — appropriate for what the fallback covers (sky, distant
-     * pixels). The original 0.5 meant ~0.1 blocks and blew up the translation term
-     * (rainbow sky, Gate D 2026-07-10). MUST match dlss_velocity.fsh and
-     * DlssMotion.debugSanityCheck.
-     */
-    public static final float ASSUMED_DEPTH = 0.0002f;
 
     private static TextureTarget velocityTarget;
     private static RenderPipeline velocityPipeline;
@@ -67,8 +53,11 @@ public final class DlssVelocity {
         return velocityTarget;
     }
 
-    /** Run the camera-velocity full-screen pass at {@code width}x{@code height}. */
-    public static void render(int width, int height) {
+    /** Run the depth-sampled velocity full-screen pass at {@code width}x{@code height}. */
+    public static void render(int width, int height, GpuTextureView depthView) {
+        if (depthView == null) {
+            return;
+        }
         TextureTarget target = ensureTarget(width, height);
         if (reprojectionBuffer == null) {
             reprojectionBuffer = new ProjectionMatrixBuffer("dlss-reprojection");
@@ -77,7 +66,7 @@ public final class DlssVelocity {
         CompiledRenderPipeline compiled = RenderSystem.getCompiledPipeline(velocityPipeline());
         if (!loggedOnce) {
             loggedOnce = true;
-            DLSSmc.LOGGER.info("[DLSSmc] velocity pass: {}x{} compiled={}", width, height, compiled);
+            DLSSmc.LOGGER.info("[DLSSmc] depth velocity pass: {}x{} compiled={}", width, height, compiled);
         }
         try (RenderPass pass = RenderSystem.getDevice()
                 .createCommandEncoder()
@@ -86,6 +75,8 @@ public final class DlssVelocity {
             pass.setPipeline(compiled);
             RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("Projection", reprojection);
+            pass.bindTexture("InSampler", depthView,
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             pass.draw(3, 1, 0, 0);
         }
     }
@@ -138,6 +129,7 @@ public final class DlssVelocity {
                     .withVertexShader("core/screenquad")
                     .withFragmentShader(Identifier.fromNamespaceAndPath("dlssmc", "core/dlss_velocity"))
                     .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+                    .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
                     // Format must match the RG16F attachment (Gate-C crash confirmed
                     // DEFAULT is RGBA8). No blending; write all channels.
                     .withColorTargetState(new ColorTargetState(

@@ -1,23 +1,22 @@
 #version 330
 
-// P1-7 Approach B, slice 1 — camera-only velocity, full-screen pass.
+// Depth-aware fullscreen velocity pass (replaces the old camera-only fallback + terrain
+// geometry prepass). Samples the level depth buffer for per-pixel accurate reprojection.
 //
-// ProjMat here is NOT a projection: it is the full reprojection matrix computed on the
-// CPU (DlssMotion.reprojectionMatrix): prevViewProj · translate(camDelta) · inv(curViewProj).
-// We reuse vanilla's Projection block/layout (BindGroupLayouts.PROJECTION) so no custom
-// UBO is needed. Applying it to the pixel's current clip position yields the
-// previous-frame clip position; velocity = (prevNDC - currNDC) * 0.5 in UV space,
-// pointing from the current pixel to where it was last frame.
+// ProjMat is the full reprojection matrix (prevViewProjTranslated * curInvViewProj),
+// computed in DlssMotion. For each pixel, the actual depth from the depth buffer is used
+// instead of an assumed far-plane value, giving correct velocity for all opaque and
+// cutout surfaces. Sky pixels (depth ≈ 0 in REVERSE-Z) naturally get far-plane velocity.
 //
-// The intermediate perspective divide of the un-projection cancels (homogeneous scale
-// invariance), so folding the chain into one matrix is exact. Exact for camera rotation
-// (depth-independent); approximate for translation. Terrain pixels are overwritten with
-// exact geometry velocity by the slice-2 prepass; this fallback covers sky/entities/
-// translucents.
+// The homogeneous-scaling trick still holds: ProjMat * vec4(ndc, depth, 1.0) = prevClip
+// with correct perspective because the intermediate division by clipW cancels out.
+// See DlssVelocity.java for the CPU-side setup.
 
 layout(std140) uniform Projection {
-    mat4 ProjMat; // reprojection matrix (see above)
+    mat4 ProjMat; // reprojection matrix (prevViewProjTranslated * curInvViewProj)
 };
+
+uniform sampler2D InSampler; // depth buffer (D32_FLOAT, REVERSE-Z: 1=near, ~0=far)
 
 in vec2 texCoord;
 
@@ -25,13 +24,9 @@ out vec4 fragColor;
 
 void main() {
     vec2 ndc = texCoord * 2.0 - 1.0;
+    float depth = texture(InSampler, texCoord).r;
 
-    // REVERSE-Z: NDC z ~ near/dist, so a SMALL z means "far away". 0.0002 with
-    // near=0.05 is ~250 blocks — right for what this fallback covers (sky, distant
-    // unprepassed pixels). Rotation is depth-independent; this only bounds the
-    // translation error. The original 0.5 meant ~0.1 blocks -> rainbow sky (Gate D).
-    // MUST match DlssVelocity.ASSUMED_DEPTH.
-    vec4 prevClip = ProjMat * vec4(ndc, 0.0002, 1.0);
+    vec4 prevClip = ProjMat * vec4(ndc, depth, 1.0);
     if (prevClip.w <= 0.0) {
         // Behind the previous camera: no valid history.
         fragColor = vec4(0.0, 0.0, 0.0, 1.0);

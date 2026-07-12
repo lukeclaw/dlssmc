@@ -15,9 +15,8 @@ import org.joml.Vector4f;
  * clip = proj · viewRot · (worldPos − cameraPos); reprojection must therefore carry the
  * camera-position delta between frames.</p>
  *
- * <p>The GPU consumers are {@code DlssVelocity} (fullscreen fallback, single folded
- * reprojection matrix) and {@code DlssTerrainVelocity} (terrain prepass, cur/prevT
- * matrix pair).</p>
+ * <p>The GPU consumer is {@code DlssVelocity} (depth-sampled fullscreen pass, single
+ * folded reprojection matrix + level depth buffer).</p>
  */
 public final class DlssMotion {
     private DlssMotion() {}
@@ -82,7 +81,7 @@ public final class DlssMotion {
             primed = true;
         }
 
-        // Derived matrices for the GPU velocity passes (DlssVelocity/DlssTerrainVelocity):
+        // Derived matrices for the GPU velocity pass (DlssVelocity):
         // prevRel = rel + camDelta  =>  prevClip = prevVP * T(camDelta) * rel.
         curInvViewProj.set(curViewProj).invert();
         prevViewProjTranslated.set(prevViewProj).translate(camDeltaX(), camDeltaY(), camDeltaZ());
@@ -119,9 +118,10 @@ public final class DlssMotion {
         if (!moved || (frame % 30) != 0) {
             return;
         }
-        // Centre pixel, NDC (0,0), at the fallback's assumed depth (REVERSE-Z: small
-        // z = far). Kept equal to the GPU fallback so values are directly comparable.
-        Vector4f clip = new Vector4f(0f, 0f, DlssVelocity.ASSUMED_DEPTH, 1f);
+        // Centre pixel, NDC (0,0), at far-plane depth (REVERSE-Z: small z = far).
+        // This validates the reprojection math for sky/distant pixels; terrain pixels
+        // use the actual depth from the buffer on the GPU.
+        Vector4f clip = new Vector4f(0f, 0f, 0.0002f, 1f);
         Vector4f rel = new Matrix4f(curViewProj).invert().transform(clip);
         if (rel.w == 0f) return;
         rel.div(rel.w); // camera-relative world point (relative to CURRENT camera)
