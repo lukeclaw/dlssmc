@@ -122,6 +122,11 @@ public final class DlssEvaluator {
     private static int outImgW, outImgH;
     private static boolean outNeedsInit; // pending UNDEFINED -> GENERAL transition
 
+    private static final int VK_FORMAT_R8G8B8A8_UNORM = 37;
+    private static final int VK_FORMAT_R16G16_SFLOAT = 83;
+    private static final int VK_FORMAT_D32_SFLOAT = 126;
+    private static final int VK_IMAGE_LAYOUT_GENERAL = 1;
+
     // FG-5b: dedicated stable-copy images tagged eValidUntilPresent for frame generation.
     private static final CopyImage depthCopy = new CopyImage(VK_FORMAT_D32_SFLOAT,
             VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
@@ -133,11 +138,6 @@ public final class DlssEvaluator {
             VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                     | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK12.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
             VK12.VK_IMAGE_ASPECT_COLOR_BIT);
-
-    private static final int VK_FORMAT_R8G8B8A8_UNORM = 37;
-    private static final int VK_FORMAT_R16G16_SFLOAT = 83;
-    private static final int VK_FORMAT_D32_SFLOAT = 126;
-    private static final int VK_IMAGE_LAYOUT_GENERAL = 1;
 
     public static String status() {
         return (broken ? "BROKEN (" + lastError + ")" : enabled ? "on" : "off")
