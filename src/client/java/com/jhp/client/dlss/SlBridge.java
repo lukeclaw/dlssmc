@@ -70,6 +70,8 @@ public final class SlBridge {
     public static final int PCL_PRESENT_START = 4;
     public static final int PCL_PRESENT_END = 5;
     private static final int REFLEX_MODE_LOW_LATENCY = 1;
+    private static final int DLSSG_MODE_OFF = 0;
+    private static final int DLSSG_MODE_ON = 1;
 
     /** (2<<48) | (12<<32) | (0<<16) | kSDKVersionMagic(0xfedc) — SDK v2.12.0. */
     private static final long SDK_VERSION = 0x0002_000C_0000_FEDCL;
@@ -103,6 +105,14 @@ public final class SlBridge {
     private static volatile long currentFrameToken;   // shared per-frame FrameToken* (FG-4)
     private static boolean reflexOptionsSet;
     private static boolean markerWarned;
+    // FG-5 DLSS-G (frame generation)
+    private static MethodHandle hDlssgSetOptions;
+    private static MethodHandle hDlssgGetState;
+    private static volatile boolean fgEnabled;
+    private static int fgNumFramesToGenerate = 1;
+    private static MemorySegment fgViewport;
+    private static MemorySegment fgOptions;
+    private static MemorySegment fgState;
     // P2-3 per-frame API
     private static MethodHandle hSlGetNewFrameToken;
     private static MethodHandle hSlSetConstants;
@@ -495,6 +505,102 @@ public final class SlBridge {
             }
             return Linker.nativeLinker().downcallHandle(MemorySegment.ofAddress(pFn.get(JAVA_LONG, 0)), fd);
         }
+    }
+
+    // ---- FG-5 DLSS-G frame generation --------------------------------------------------
+
+    public static boolean isFrameGenEnabled() {
+        return fgEnabled;
+    }
+
+    private static void ensureFgStructs() {
+        if (fgViewport != null) {
+            return;
+        }
+        Arena g = Arena.global();
+        fgViewport = g.allocate(40, 8);
+        writeHeader(fgViewport, 0x171b6435, (short) 0x9b3c, (short) 0x4fc8,
+                new byte[] { (byte) 0x99, (byte) 0x94, (byte) 0xfb, (byte) 0xe5, 0x25, 0x69, (byte) 0xaa, (byte) 0xa4 }, 1);
+        fgViewport.set(JAVA_INT, 32, 0);                                    // viewport id 0
+        fgOptions = g.allocate(120, 8);                                     // DLSSGOptions v5
+        writeHeader(fgOptions, 0xfac5f1cb, (short) 0x2dfd, (short) 0x4f36,
+                new byte[] { (byte) 0xa1, (byte) 0xe6, 0x3a, (byte) 0x9e, (byte) 0x86, 0x52, 0x56, (byte) 0xc5 }, 5);
+        fgState = g.allocate(88, 8);                                        // DLSSGState v4
+        writeHeader(fgState, 0xcc8ac8e1, (short) 0xa179, (short) 0x44f5,
+                new byte[] { (byte) 0x97, (byte) 0xfa, (byte) 0xe7, 0x41, 0x12, (byte) 0xf9, (byte) 0xbc, 0x61 }, 4);
+    }
+
+    /** Enable/disable DLSS-G. Returns sl::Result of slDLSSGSetOptions, or -1 if unavailable. */
+    public static int setFrameGeneration(boolean on) {
+        if (!isInstanceProxied()) {
+            return -1;
+        }
+        try {
+            ensureFgStructs();
+            if (hDlssgSetOptions == null) {
+                hDlssgSetOptions = resolveFeatureFn(K_FEATURE_DLSS_G, "slDLSSGSetOptions",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                if (hDlssgSetOptions == null) {
+                    return -1;
+                }
+            }
+            fgOptions.set(JAVA_INT, 32, on ? DLSSG_MODE_ON : DLSSG_MODE_OFF);   // mode
+            fgOptions.set(JAVA_INT, 36, fgNumFramesToGenerate);                 // numFramesToGenerate
+            int r = (int) hDlssgSetOptions.invokeExact(fgViewport, fgOptions);
+            if (r == SL_OK) {
+                fgEnabled = on;
+            }
+            DLSSmc.LOGGER.info("[DLSSmc] slDLSSGSetOptions(mode={}, n={}) -> sl::Result={}",
+                    on ? "eOn" : "eOff", fgNumFramesToGenerate, r);
+            return r;
+        } catch (Throwable t) {
+            DLSSmc.LOGGER.error("[DLSSmc] setFrameGeneration failed", t);
+            return -1;
+        }
+    }
+
+    /** Human-readable DLSS-G state via slDLSSGGetState (/dlssmc fg readout). */
+    public static String frameGenState() {
+        if (!isInstanceProxied()) {
+            return "SL inactive";
+        }
+        try {
+            ensureFgStructs();
+            if (hDlssgGetState == null) {
+                hDlssgGetState = resolveFeatureFn(K_FEATURE_DLSS_G, "slDLSSGGetState",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS));
+                if (hDlssgGetState == null) {
+                    return "slDLSSGGetState unavailable";
+                }
+            }
+            int r = (int) hDlssgGetState.invokeExact(fgViewport, fgState, MemorySegment.NULL);
+            if (r != SL_OK) {
+                return "slDLSSGGetState -> sl::Result=" + r;
+            }
+            long vram = fgState.get(JAVA_LONG, 32);
+            int status = fgState.get(JAVA_INT, 40);
+            int minWH = fgState.get(JAVA_INT, 44);
+            int presented = fgState.get(JAVA_INT, 48);
+            int maxFrames = fgState.get(JAVA_INT, 52);
+            return String.format("status=0x%X (%s), maxGen=%d, minWH=%d, presentedSinceLast=%d, ~VRAM=%.1fMB",
+                    status, dlssgStatusString(status), maxFrames, minWH, presented, vram / (1024.0 * 1024.0));
+        } catch (Throwable t) {
+            DLSSmc.LOGGER.error("[DLSSmc] frameGenState failed", t);
+            return "exception: " + t;
+        }
+    }
+
+    private static String dlssgStatusString(int status) {
+        if (status == 0) {
+            return "eOk";
+        }
+        StringBuilder sb = new StringBuilder();
+        if ((status & (1 << 0)) != 0) { sb.append("ResolutionTooLow "); }
+        if ((status & (1 << 1)) != 0) { sb.append("ReflexNotDetected "); }
+        if ((status & (1 << 2)) != 0) { sb.append("HDRFormatNotSupported "); }
+        if ((status & (1 << 3)) != 0) { sb.append("CommonConstantsInvalid "); }
+        if ((status & (1 << 4)) != 0) { sb.append("GetCurrentBackBufferIndexNotCalled "); }
+        return sb.toString().trim();
     }
 
     // ------------------------------------------------------------------------------------

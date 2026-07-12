@@ -401,6 +401,11 @@ public final class DlssEvaluator {
                 VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                         | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
         TAGS.set(JAVA_INT, 3 * 64 + 40, 4);
+        // FG-5: when frame generation is ON, depth+MV must survive until PRESENT (FG
+        // consumes them at present time), not just until evaluate.
+        int lc = SlBridge.isFrameGenEnabled() ? 1 : 2; // eValidUntilPresent : eValidUntilEvaluate
+        TAGS.set(JAVA_INT, 0 * 64 + 44, lc); // depth
+        TAGS.set(JAVA_INT, 1 * 64 + 44, lc); // motion vectors
     }
 
     private static void fillResource(int slot, VulkanGpuTexture tex, VulkanGpuTextureView view,

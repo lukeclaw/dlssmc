@@ -52,6 +52,13 @@ public class DLSSmcClient implements ClientModInitializer {
 									"[DLSSmc] Streamline: " + SlBridge.status()));
 							return 1;
 						}))
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("fg").executes(ctx -> {
+							int r = SlBridge.setFrameGeneration(!SlBridge.isFrameGenEnabled());
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] Frame Gen: " + (SlBridge.isFrameGenEnabled() ? "ON" : "OFF")
+									+ " (slDLSSGSetOptions=" + r + "); " + SlBridge.frameGenState()));
+							return 1;
+						}))
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("scale").executes(ctx -> {
 							DlssResolution.cycleScale();
 							ctx.getSource().sendFeedback(Component.literal(
