@@ -224,28 +224,14 @@ public final class DlssEvaluator {
                     mvCopy.transitionIfNeeded(cb, stack);
                     hudlessCopy.transitionIfNeeded(cb, stack);
                 }
-                // World render + velocity fragment writes -> DLSS compute reads.
-                // Source: color+depth attachments written by the world render pass
-                // and color attachment written by the velocity pass.
-                barrier(cb, stack,
-                    VK12.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                        | VK12.VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-                    VK12.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                        | VK12.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    VK12.VK_ACCESS_SHADER_READ_BIT);
+                globalBarrier(cb, stack);
 
                 if (fg) {
                     copyImage(cb, stack, ((VulkanGpuTexture) levelTarget.getDepthTexture()).vkImage(),
                             depthCopy.image, VK12.VK_IMAGE_ASPECT_DEPTH_BIT, inW, inH);
                     copyImage(cb, stack, ((VulkanGpuTexture) velocity.getColorTexture()).vkImage(),
                             mvCopy.image, VK12.VK_IMAGE_ASPECT_COLOR_BIT, velocity.width, velocity.height);
-                    // Stable-copy transfer writes -> DLSS compute reads.
-                    barrier(cb, stack,
-                        VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK12.VK_ACCESS_SHADER_READ_BIT);
+                    globalBarrier(cb, stack);
                 }
 
                 fillResourcesAndTags(levelTarget, nativeTarget, fg);
@@ -263,29 +249,14 @@ public final class DlssEvaluator {
                     return fail("slEvaluateFeature -> " + r);
                 }
 
-                // DLSS compute writes -> transfer copy reads.
-                barrier(cb, stack,
-                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    VK12.VK_ACCESS_SHADER_WRITE_BIT,
-                    VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK12.VK_ACCESS_TRANSFER_READ_BIT);
+                globalBarrier(cb, stack);
                 copyOutputToNative(cb, stack, nativeTarget, outWpx, outHpx);
                 if (fg) {
-                    // Native-target copy writes -> HUD-less snapshot copy reads.
-                    barrier(cb, stack,
-                        VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK12.VK_ACCESS_TRANSFER_READ_BIT);
+                    globalBarrier(cb, stack);
                     copyImage(cb, stack, ((VulkanGpuTexture) nativeTarget.getColorTexture()).vkImage(),
                             hudlessCopy.image, VK12.VK_IMAGE_ASPECT_COLOR_BIT, outWpx, outHpx);
                 }
-                // All copies done -> make visible for subsequent hand/HUD render pass.
-                barrier(cb, stack,
-                    VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                    VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT);
+                globalBarrier(cb, stack);
                 VK12.vkEndCommandBuffer(cb);
                 encoder.execute(cb);
             }
@@ -630,13 +601,13 @@ public final class DlssEvaluator {
                 VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, null, null, barrier);
     }
 
-    /** Stage-specific memory barrier — narrows pipeline stall to only what's needed. */
-    private static void barrier(VkCommandBuffer cb, MemoryStack stack,
-            int srcStage, int srcAccess, int dstStage, int dstAccess) {
-        VkMemoryBarrier.Buffer b = VkMemoryBarrier.calloc(1, stack).sType$Default()
-                .srcAccessMask(srcAccess)
-                .dstAccessMask(dstAccess);
-        VK12.vkCmdPipelineBarrier(cb, srcStage, dstStage, 0, b, null, null);
+    /** Global everything->everything barrier — matches renderpearl's own sync style. */
+    private static void globalBarrier(VkCommandBuffer cb, MemoryStack stack) {
+        VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack).sType$Default()
+                .srcAccessMask(VK12.VK_ACCESS_MEMORY_WRITE_BIT)
+                .dstAccessMask(VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT);
+        VK12.vkCmdPipelineBarrier(cb, VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, barrier, null, null);
     }
 
     private static void copyOutputToNative(VkCommandBuffer cb, MemoryStack stack,
