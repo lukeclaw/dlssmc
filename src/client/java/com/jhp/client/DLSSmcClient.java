@@ -12,9 +12,17 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 public class DLSSmcClient implements ClientModInitializer {
+
+	/** MV-Q tuning panel keybind (default K, rebindable in Controls -> Misc). */
+	public static final KeyMapping OPEN_PANEL = new KeyMapping(
+			"key.dlssmc.open_panel", GLFW.GLFW_KEY_K, KeyMapping.Category.MISC);
 
 	@Override
 	public void onInitializeClient() {
@@ -24,6 +32,16 @@ public class DLSSmcClient implements ClientModInitializer {
 		DLSSmc.LOGGER.info(
 				"[DLSSmc] client init - awaiting Vulkan device capture (deviceReady={})",
 				DlssRenderState.isDeviceReady());
+
+		// MV-Q tuning panel: register the K keybind and open the screen on press.
+		KeyBindingHelper.registerKeyBinding(OPEN_PANEL);
+		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			while (OPEN_PANEL.consumeClick()) {
+				if (client.gui.screen() == null) {
+					client.gui.setScreen(new DlssTuningScreen());
+				}
+			}
+		});
 
 		// Debug/settings toggles. This Fabric API build has no ClientCommandManager
 		// sugar class, so the brigadier literals are built directly. A real Video
