@@ -5,17 +5,14 @@ import com.jhp.DLSSmc;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder;
 import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture;
 import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
 
 import org.joml.Matrix4f;
-import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
-import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
-import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkImageCopy;
 import org.lwjgl.vulkan.VkImageCreateInfo;
@@ -25,8 +22,6 @@ import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryBarrier;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
-import org.lwjgl.vulkan.VkQueue;
-import org.lwjgl.vulkan.VkSubmitInfo;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -140,11 +135,6 @@ public final class DlssEvaluator {
     private static int outImgW, outImgH;
     private static boolean outNeedsInit; // pending UNDEFINED -> GENERAL transition
 
-    // ---- pre-allocated command pool + double-buffered command buffers (no transient encoder) ----
-    private static long dlssCmdPool;
-    private static long[] dlssCmdBufs = new long[2];
-    private static int dlssCmdBufIndex;
-
     private static final int VK_FORMAT_R8G8B8A8_UNORM = 37;
     private static final int VK_FORMAT_R16G16_SFLOAT = 83;
     private static final int VK_FORMAT_D32_SFLOAT = 126;
@@ -212,14 +202,11 @@ public final class DlssEvaluator {
                 return fail("slSetConstants -> " + r);
             }
 
-            ensureCmdResources();
-            VkCommandBuffer cb = new VkCommandBuffer(dlssCmdBufs[dlssCmdBufIndex], DlssRenderState.device());
+            VulkanCommandEncoder encoder = (VulkanCommandEncoder)
+                    RenderSystem.getDevice().createCommandEncoder().backend();
+            VkCommandBuffer cb = encoder.allocateAndBeginTransientCommandBuffer();
 
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
-                        .sType$Default()
-                        .flags(0);
-                VK12.vkBeginCommandBuffer(cb, beginInfo);
                 boolean fg = SlBridge.isFrameGenEnabled();
                 TextureTarget velocity = DlssVelocity.velocityTarget();
                 if (outNeedsInit) {
@@ -265,14 +252,14 @@ public final class DlssEvaluator {
                 int numTags = fg ? 5 : 4;
                 r = SlBridge.setTagForFrame(token, VIEWPORT, TAGS, numTags, cb.address());
                 if (r != SlBridge.SL_OK) {
-                    abandon(cb);
+                    abandon(cb, encoder);
                     return fail("slSetTagForFrame -> " + r);
                 }
 
                 EVAL_INPUTS.set(ADDRESS, 0, VIEWPORT);
                 r = SlBridge.evaluateDlss(token, EVAL_INPUTS, 1, cb.address());
                 if (r != SlBridge.SL_OK) {
-                    abandon(cb);
+                    abandon(cb, encoder);
                     return fail("slEvaluateFeature -> " + r);
                 }
 
@@ -300,11 +287,7 @@ public final class DlssEvaluator {
                     VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                     VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT);
                 VK12.vkEndCommandBuffer(cb);
-
-                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default()
-                        .pCommandBuffers(stack.pointers(dlssCmdBufs[dlssCmdBufIndex]));
-                vkCheck(VK12.vkQueueSubmit(DlssRenderState.graphicsQueue(), submitInfo, VK12.VK_NULL_HANDLE), "vkQueueSubmit");
-                dlssCmdBufIndex ^= 1;
+                encoder.execute(cb);
             }
 
             if (frames == 0) {
@@ -337,46 +320,10 @@ public final class DlssEvaluator {
         return false;
     }
 
-    /** End + submit the DLSS command buffer on failure (keeps the frame consistent). */
-    private static void abandon(VkCommandBuffer cb) {
+    /** End + submit an already-allocated cmd buffer so the frame stays consistent. */
+    private static void abandon(VkCommandBuffer cb, VulkanCommandEncoder encoder) {
         VK12.vkEndCommandBuffer(cb);
-        VkDevice device = DlssRenderState.device();
-        VkQueue graphicsQueue = DlssRenderState.graphicsQueue();
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkSubmitInfo si = VkSubmitInfo.calloc(stack).sType$Default()
-                    .pCommandBuffers(stack.pointers(cb.address()));
-            vkCheck(VK12.vkQueueSubmit(graphicsQueue, si, VK12.VK_NULL_HANDLE), "vkQueueSubmit");
-        }
-    }
-
-    private static void ensureCmdResources() {
-        if (dlssCmdPool != 0) {
-            return;
-        }
-        VkDevice device = DlssRenderState.device();
-        int family = DlssRenderState.graphicsQueueFamily();
-        if (device == null || family < 0) {
-            return;
-        }
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack).sType$Default()
-                    .queueFamilyIndex(family)
-                    .flags(VK12.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-            LongBuffer pPool = stack.mallocLong(1);
-            vkCheck(VK12.vkCreateCommandPool(device, poolInfo, null, pPool), "vkCreateCommandPool");
-            dlssCmdPool = pPool.get(0);
-
-            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
-                    .commandPool(dlssCmdPool)
-                    .level(VK12.VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                    .commandBufferCount(2);
-            PointerBuffer pBufs = stack.mallocPointer(2);
-            vkCheck(VK12.vkAllocateCommandBuffers(device, allocInfo, pBufs), "vkAllocateCommandBuffers");
-            dlssCmdBufs[0] = pBufs.get(0);
-            dlssCmdBufs[1] = pBufs.get(1);
-            dlssCmdBufIndex = 0;
-            DLSSmc.LOGGER.info("[DLSSmc] DLSS command pool + 2 cmd buffers allocated");
-        }
+        encoder.execute(cb);
     }
 
     private static void initStructsOnce() {
