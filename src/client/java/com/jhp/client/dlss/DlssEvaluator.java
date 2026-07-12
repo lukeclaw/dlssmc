@@ -110,8 +110,8 @@ public final class DlssEvaluator {
     private static final Arena A = Arena.global();
     private static final MemorySegment VIEWPORT = A.allocate(40, 8);
     private static final MemorySegment CONSTANTS = A.allocate(456, 8);
-    private static final MemorySegment RESOURCES = A.allocate(4 * 112, 8);
-    private static final MemorySegment TAGS = A.allocate(4 * 64, 8);
+    private static final MemorySegment RESOURCES = A.allocate(5 * 112, 8);   // FG-5b: +HUD-less slot
+    private static final MemorySegment TAGS = A.allocate(5 * 64, 8);
     private static final MemorySegment EVAL_INPUTS = A.allocate(ADDRESS);
     private static final MemorySegment DLSS_OPTIONS = A.allocate(88, 8);
     private static final float[] MAT_TMP = new float[16];
@@ -121,6 +121,18 @@ public final class DlssEvaluator {
     private static long outImage, outMemory, outView;
     private static int outImgW, outImgH;
     private static boolean outNeedsInit; // pending UNDEFINED -> GENERAL transition
+
+    // FG-5b: dedicated stable-copy images tagged eValidUntilPresent for frame generation.
+    private static final CopyImage depthCopy = new CopyImage(VK_FORMAT_D32_SFLOAT,
+            VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK12.VK_IMAGE_ASPECT_DEPTH_BIT);
+    private static final CopyImage mvCopy = new CopyImage(VK_FORMAT_R16G16_SFLOAT,
+            VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK12.VK_IMAGE_ASPECT_COLOR_BIT);
+    private static final CopyImage hudlessCopy = new CopyImage(VK_FORMAT_R8G8B8A8_UNORM,
+            VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK12.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            VK12.VK_IMAGE_ASPECT_COLOR_BIT);
 
     private static final int VK_FORMAT_R8G8B8A8_UNORM = 37;
     private static final int VK_FORMAT_R16G16_SFLOAT = 83;
@@ -181,14 +193,36 @@ public final class DlssEvaluator {
             VkCommandBuffer cb = encoder.allocateAndBeginTransientCommandBuffer();
 
             try (MemoryStack stack = MemoryStack.stackPush()) {
+                boolean fg = SlBridge.isFrameGenEnabled();
+                TextureTarget velocity = DlssVelocity.velocityTarget();
                 if (outNeedsInit) {
                     transitionOutputToGeneral(cb, stack);
                     outNeedsInit = false;
                 }
-                globalBarrier(cb, stack); // world render + velocity writes -> DLSS reads
+                if (fg) {
+                    // FG-5b: snapshot depth+MV(+HUD-less) into dedicated images so FG, which
+                    // consumes them async at PRESENT, never reads the live buffers while the
+                    // next frame's render pass overwrites them (the fast-motion smearing).
+                    depthCopy.ensure(inW, inH);
+                    mvCopy.ensure(velocity.width, velocity.height);
+                    hudlessCopy.ensure(outWpx, outHpx);
+                    depthCopy.transitionIfNeeded(cb, stack);
+                    mvCopy.transitionIfNeeded(cb, stack);
+                    hudlessCopy.transitionIfNeeded(cb, stack);
+                }
+                globalBarrier(cb, stack); // world render + velocity writes -> reads
 
-                fillResourcesAndTags(levelTarget, nativeTarget);
-                r = SlBridge.setTagForFrame(token, VIEWPORT, TAGS, 4, cb.address());
+                if (fg) {
+                    copyImage(cb, stack, ((VulkanGpuTexture) levelTarget.getDepthTexture()).vkImage(),
+                            depthCopy.image, VK12.VK_IMAGE_ASPECT_DEPTH_BIT, inW, inH);
+                    copyImage(cb, stack, ((VulkanGpuTexture) velocity.getColorTexture()).vkImage(),
+                            mvCopy.image, VK12.VK_IMAGE_ASPECT_COLOR_BIT, velocity.width, velocity.height);
+                    globalBarrier(cb, stack); // copy writes -> DLSS reads
+                }
+
+                fillResourcesAndTags(levelTarget, nativeTarget, fg);
+                int numTags = fg ? 5 : 4;
+                r = SlBridge.setTagForFrame(token, VIEWPORT, TAGS, numTags, cb.address());
                 if (r != SlBridge.SL_OK) {
                     abandon(cb, encoder);
                     return fail("slSetTagForFrame -> " + r);
@@ -203,6 +237,11 @@ public final class DlssEvaluator {
 
                 globalBarrier(cb, stack); // DLSS writes -> copy reads
                 copyOutputToNative(cb, stack, nativeTarget, outWpx, outHpx);
+                if (fg) {
+                    globalBarrier(cb, stack); // DLSS output in native -> HUD-less snapshot read
+                    copyImage(cb, stack, ((VulkanGpuTexture) nativeTarget.getColorTexture()).vkImage(),
+                            hudlessCopy.image, VK12.VK_IMAGE_ASPECT_COLOR_BIT, outWpx, outHpx);
+                }
                 globalBarrier(cb, stack); // copy writes -> subsequent hand/HUD reads
             }
 
@@ -257,12 +296,12 @@ public final class DlssEvaluator {
         header(CONSTANTS, 0xdcd35ad7, (short) 0x4e4a, (short) 0x4bad,
                 new byte[] { (byte) 0xa9, 0x0c, (byte) 0xe0, (byte) 0xc4, (byte) 0x9e, (byte) 0xb2, 0x3a, (byte) 0xfe }, 2);
         // Resource {3A9D70CF-2418-4B72-8391-13F8721C7261} v1 (x4)
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             header(RESOURCES.asSlice(i * 112L, 112), 0x3a9d70cf, (short) 0x2418, (short) 0x4b72,
                     new byte[] { (byte) 0x83, (byte) 0x91, 0x13, (byte) 0xf8, 0x72, 0x1c, 0x72, 0x61 }, 1);
         }
         // ResourceTag {4C6A5AAD-B445-496C-87FF-1AF3845BE653} v1 (x4)
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             MemorySegment tag = TAGS.asSlice(i * 64L, 64);
             header(tag, 0x4c6a5aad, (short) 0xb445, (short) 0x496c,
                     new byte[] { (byte) 0x87, (byte) 0xff, 0x1a, (byte) 0xf3, (byte) 0x84, 0x5b, (byte) 0xe6, 0x53 }, 1);
@@ -379,17 +418,31 @@ public final class DlssEvaluator {
         MemorySegment.copy(MAT_TMP, 0, c, JAVA_FLOAT, offset, 16);
     }
 
-    private static void fillResourcesAndTags(TextureTarget level, RenderTarget nativeTarget) {
+    private static void fillResourcesAndTags(TextureTarget level, RenderTarget nativeTarget, boolean fg) {
         TextureTarget velocity = DlssVelocity.velocityTarget();
-        // slot 0: depth (level D32) — kBufferTypeDepth = 0
-        fillResource(0, (VulkanGpuTexture) level.getDepthTexture(),
-                (VulkanGpuTextureView) level.getDepthTextureView(), VK_FORMAT_D32_SFLOAT,
-                level.width, level.height);
+        int depthUsage = VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                | VK12.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        int mvUsage = VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                | VK12.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        // slot 0: depth — kBufferTypeDepth = 0 (stable copy when FG on, else live level depth)
+        if (fg) {
+            fillResourceRaw(0, depthCopy.image, depthCopy.view, VK_FORMAT_D32_SFLOAT,
+                    depthCopy.w, depthCopy.h, depthUsage);
+        } else {
+            fillResource(0, (VulkanGpuTexture) level.getDepthTexture(),
+                    (VulkanGpuTextureView) level.getDepthTextureView(), VK_FORMAT_D32_SFLOAT,
+                    level.width, level.height);
+        }
         TAGS.set(JAVA_INT, 0 * 64 + 40, 0);
-        // slot 1: motion vectors (velocity RG16F) — kBufferTypeMotionVectors = 1
-        fillResource(1, (VulkanGpuTexture) velocity.getColorTexture(),
-                (VulkanGpuTextureView) velocity.getColorTextureView(), VK_FORMAT_R16G16_SFLOAT,
-                velocity.width, velocity.height);
+        // slot 1: motion vectors — kBufferTypeMotionVectors = 1 (stable copy when FG on)
+        if (fg) {
+            fillResourceRaw(1, mvCopy.image, mvCopy.view, VK_FORMAT_R16G16_SFLOAT,
+                    mvCopy.w, mvCopy.h, mvUsage);
+        } else {
+            fillResource(1, (VulkanGpuTexture) velocity.getColorTexture(),
+                    (VulkanGpuTextureView) velocity.getColorTextureView(), VK_FORMAT_R16G16_SFLOAT,
+                    velocity.width, velocity.height);
+        }
         TAGS.set(JAVA_INT, 1 * 64 + 40, 1);
         // slot 2: scaling input color (level RGBA8) — kBufferTypeScalingInputColor = 3
         fillResource(2, (VulkanGpuTexture) level.getColorTexture(),
@@ -401,11 +454,22 @@ public final class DlssEvaluator {
                 VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                         | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
         TAGS.set(JAVA_INT, 3 * 64 + 40, 4);
-        // FG-5: when frame generation is ON, depth+MV must survive until PRESENT (FG
-        // consumes them at present time), not just until evaluate.
-        int lc = SlBridge.isFrameGenEnabled() ? 1 : 2; // eValidUntilPresent : eValidUntilEvaluate
-        TAGS.set(JAVA_INT, 0 * 64 + 44, lc); // depth
-        TAGS.set(JAVA_INT, 1 * 64 + 44, lc); // motion vectors
+        // lifecycle: eOnlyValidNow=0, eValidUntilPresent=1, eValidUntilEvaluate=2
+        int lc = fg ? 1 : 2;
+        TAGS.set(JAVA_INT, 0 * 64 + 44, lc);  // depth
+        TAGS.set(JAVA_INT, 1 * 64 + 44, lc);  // motion vectors
+        TAGS.set(JAVA_INT, 2 * 64 + 44, 2);   // scaling input: evaluate-only
+        TAGS.set(JAVA_INT, 3 * 64 + 44, 2);   // scaling output: evaluate-only
+        if (fg) {
+            // slot 4: HUD-less color — kBufferTypeHUDLessColor = 2 (native snapshot before
+            // hand/HUD; filled after copyOutputToNative, read by FG at present).
+            fillResourceRaw(4, hudlessCopy.image, hudlessCopy.view, VK_FORMAT_R8G8B8A8_UNORM,
+                    hudlessCopy.w, hudlessCopy.h,
+                    VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                            | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK12.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+            TAGS.set(JAVA_INT, 4 * 64 + 40, 2);   // type = kBufferTypeHUDLessColor
+            TAGS.set(JAVA_INT, 4 * 64 + 44, 1);   // eValidUntilPresent
+        }
     }
 
     private static void fillResource(int slot, VulkanGpuTexture tex, VulkanGpuTextureView view,
@@ -540,6 +604,113 @@ public final class DlssEvaluator {
         region.dstSubresource().set(VK12.VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1);
         region.extent().set(w, h, 1);
         VK12.vkCmdCopyImage(cb, outImage, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, region);
+    }
+
+    // ---- FG-5b stable-copy image helpers ------------------------------------------------
+
+    /** A dedicated device-local image that FG can read at present (stable across the frame). */
+    private static final class CopyImage {
+        final int format;
+        final int usage;
+        final int aspect;
+        long image, memory, view;
+        int w, h;
+        boolean needsInit;
+
+        CopyImage(int format, int usage, int aspect) {
+            this.format = format;
+            this.usage = usage;
+            this.aspect = aspect;
+        }
+
+        void ensure(int width, int height) {
+            if (image != 0 && w == width && h == height) {
+                return;
+            }
+            VkDevice device = DlssRenderState.device();
+            if (image != 0) {
+                VK12.vkDeviceWaitIdle(device);
+                VK12.vkDestroyImageView(device, view, null);
+                VK12.vkDestroyImage(device, image, null);
+                VK12.vkFreeMemory(device, memory, null);
+                image = view = memory = 0;
+            }
+            long[] h3 = makeImage(device, width, height, format, usage, aspect);
+            image = h3[0];
+            memory = h3[1];
+            view = h3[2];
+            w = width;
+            h = height;
+            needsInit = true;
+        }
+
+        void transitionIfNeeded(VkCommandBuffer cb, MemoryStack stack) {
+            if (needsInit) {
+                transitionToGeneral(cb, stack, image, aspect);
+                needsInit = false;
+            }
+        }
+    }
+
+    /** Create a DEVICE_LOCAL 2D image + view; returns {image, memory, view}. */
+    private static long[] makeImage(VkDevice device, int w, int h, int format, int usage, int aspect) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkImageCreateInfo ici = VkImageCreateInfo.calloc(stack).sType$Default()
+                    .imageType(VK12.VK_IMAGE_TYPE_2D).format(format).mipLevels(1).arrayLayers(1)
+                    .samples(VK12.VK_SAMPLE_COUNT_1_BIT).tiling(VK12.VK_IMAGE_TILING_OPTIMAL)
+                    .usage(usage).sharingMode(VK12.VK_SHARING_MODE_EXCLUSIVE)
+                    .initialLayout(VK12.VK_IMAGE_LAYOUT_UNDEFINED);
+            ici.extent().set(w, h, 1);
+            LongBuffer pImage = stack.callocLong(1);
+            vkCheck(VK12.vkCreateImage(device, ici, null, pImage), "vkCreateImage(copy)");
+            long image = pImage.get(0);
+            VkMemoryRequirements memReq = VkMemoryRequirements.calloc(stack);
+            VK12.vkGetImageMemoryRequirements(device, image, memReq);
+            VkPhysicalDeviceMemoryProperties memProps = VkPhysicalDeviceMemoryProperties.calloc(stack);
+            VK12.vkGetPhysicalDeviceMemoryProperties(device.getPhysicalDevice(), memProps);
+            int typeIndex = -1;
+            for (int i = 0; i < memProps.memoryTypeCount(); i++) {
+                if ((memReq.memoryTypeBits() & (1 << i)) != 0
+                        && (memProps.memoryTypes(i).propertyFlags() & VK12.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+                    typeIndex = i;
+                    break;
+                }
+            }
+            if (typeIndex < 0) {
+                throw new IllegalStateException("no DEVICE_LOCAL memory type for copy image");
+            }
+            VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
+                    .allocationSize(memReq.size()).memoryTypeIndex(typeIndex);
+            LongBuffer pMem = stack.callocLong(1);
+            vkCheck(VK12.vkAllocateMemory(device, mai, null, pMem), "vkAllocateMemory(copy)");
+            vkCheck(VK12.vkBindImageMemory(device, image, pMem.get(0), 0), "vkBindImageMemory(copy)");
+            VkImageViewCreateInfo vci = VkImageViewCreateInfo.calloc(stack).sType$Default()
+                    .image(image).viewType(VK12.VK_IMAGE_VIEW_TYPE_2D).format(format);
+            vci.subresourceRange().set(aspect, 0, 1, 0, 1);
+            LongBuffer pView = stack.callocLong(1);
+            vkCheck(VK12.vkCreateImageView(device, vci, null, pView), "vkCreateImageView(copy)");
+            DLSSmc.LOGGER.info("[DLSSmc] FG-5b copy image {}x{} fmt={} created", w, h, format);
+            return new long[] { image, pMem.get(0), pView.get(0) };
+        }
+    }
+
+    private static void transitionToGeneral(VkCommandBuffer cb, MemoryStack stack, long image, int aspect) {
+        VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default()
+                .oldLayout(VK12.VK_IMAGE_LAYOUT_UNDEFINED).newLayout(VK_IMAGE_LAYOUT_GENERAL)
+                .srcAccessMask(0).dstAccessMask(VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT)
+                .srcQueueFamilyIndex(-1).dstQueueFamilyIndex(-1).image(image);
+        barrier.subresourceRange().set(aspect, 0, 1, 0, 1);
+        VK12.vkCmdPipelineBarrier(cb, VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, null, null, barrier);
+    }
+
+    private static void copyImage(VkCommandBuffer cb, MemoryStack stack, long src, long dst,
+            int aspect, int w, int h) {
+        VkImageCopy.Buffer region = VkImageCopy.calloc(1, stack);
+        region.srcSubresource().set(aspect, 0, 0, 1);
+        region.dstSubresource().set(aspect, 0, 0, 1);
+        region.extent().set(w, h, 1);
+        VK12.vkCmdCopyImage(cb, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, region);
     }
 
     private static void vkCheck(int result, String what) {
