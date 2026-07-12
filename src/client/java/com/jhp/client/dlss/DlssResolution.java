@@ -34,6 +34,8 @@ public final class DlssResolution {
         scaleIndex = (scaleIndex + 1) % SCALES.length;
         scale = SCALES[scaleIndex];
         loggedOnce = false; // re-log the new internal resolution on the next frame
+        // MV-Q: the terrain mip-LOD bias is a function of scale — rebuild the sampler.
+        DlssMipBias.requestSamplerReset();
         DLSSmc.LOGGER.info("[DLSSmc] render scale -> {} ({})", scale, enabled() ? "decoupled" : "native/off");
     }
 

@@ -9,7 +9,8 @@
 		"VulkanGpuSurfaceMixin",
 		"MinecraftMixin",
 		"GameRendererMixin",
-		"LevelRendererMixin"
+		"LevelRendererMixin",
+		"VulkanGpuSamplerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

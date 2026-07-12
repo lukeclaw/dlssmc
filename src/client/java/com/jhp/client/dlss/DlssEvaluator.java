@@ -80,9 +80,11 @@ public final class DlssEvaluator {
     // be negative (current default). Toggle live to A/B.
     public static volatile float mvSignX = 1f;
     public static volatile float mvSignY = -1f;
-    /** Sign of the jitterOffset REPORTED to SL (applied matrix jitter unchanged). */
-    public static volatile float jitterSignX = 1f;
-    public static volatile float jitterSignY = 1f;
+    /** Sign of the jitterOffset REPORTED to SL (applied matrix jitter unchanged).
+     * MV-Q Gate-D A/B 2026-07-12 (user): (-,-) clearly sharpest — (+,+) had DLSS
+     * un-jittering in the wrong direction, a permanent per-frame blur. */
+    public static volatile float jitterSignX = -1f;
+    public static volatile float jitterSignY = -1f;
 
     /**
      * DLSS mode override (/dlssmc mode): -1 = auto by scale (<=0.55 -> MaxPerformance,

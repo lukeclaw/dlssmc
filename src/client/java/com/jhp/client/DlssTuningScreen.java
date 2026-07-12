@@ -1,6 +1,7 @@
 package com.jhp.client;
 
 import com.jhp.client.dlss.DlssEvaluator;
+import com.jhp.client.dlss.DlssMipBias;
 import com.jhp.client.dlss.DlssResolution;
 import com.jhp.client.dlss.DlssVelocity;
 import com.jhp.client.dlss.SlBridge;
@@ -56,6 +57,7 @@ public class DlssTuningScreen extends Screen {
                     default -> 0;
                 }));
         col.addChild(cycle(() -> "Render Scale: " + DlssResolution.scale, DlssResolution::cycleScale));
+        col.addChild(cycle(DlssMipBias::status, DlssMipBias::cycleExtra));
         col.addChild(cycle(() -> "Frame Gen: " + (SlBridge.isFrameGenEnabled() ? "ON" : "OFF"), () ->
                 SlBridge.setFrameGeneration(!SlBridge.isFrameGenEnabled())));
         col.addChild(cycle(() -> "MV Overlay: " + (DlssVelocity.showDebug ? "ON" : "OFF"), () ->

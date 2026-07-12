@@ -22,8 +22,19 @@ import org.joml.Matrix4f;
 public final class DlssJitter {
     private DlssJitter() {}
 
-    /** Jitter phase count. DLSS suggests ~8 * (outputRes/renderRes)^2; tune later. */
-    private static final int PHASE_COUNT = 16;
+    /**
+     * Jitter phase count per the DLSS programming guide: 8 * (outputRes/renderRes)^2
+     * = 8 / scale^2 — 32 at scale 0.5, ~18 at 0.667, 8 at native/DLAA. Was a fixed 16
+     * (MV-Q fix 2026-07-12): too few phases at 0.5 starves DLSS of the sub-pixel
+     * samples it needs to reconstruct fine/distant detail.
+     */
+    private static int phaseCount() {
+        float s = DlssResolution.scale;
+        if (s <= 0f || s >= 0.999f) {
+            return 8;
+        }
+        return Math.max(8, Math.min(64, Math.round(8f / (s * s))));
+    }
 
     // Sign conventions to flip during empirical tuning.
     private static final float SIGN_X = 1.0f;
@@ -43,7 +54,7 @@ public final class DlssJitter {
 
     /** Start of a level frame: advance the sequence and open the jitter window. */
     public static void beginLevelFrame() {
-        phase = (phase + 1) % PHASE_COUNT;
+        phase = (phase + 1) % phaseCount();
         // Halton is defined on [0,1); center to [-0.5, 0.5) so the mean offset is ~0.
         offsetX = halton(phase + 1, 2) - 0.5f;
         offsetY = halton(phase + 1, 3) - 0.5f;

@@ -16,6 +16,26 @@
 > **OBSOLETE**. Claude reads the decompiled `-sources.jar` in `.gradle/loom-cache`
 > directly. Human is needed only for Gate B (build) and Gates C/D (run/screenshot).
 
+**MV-Q DETAIL PASS (2026-07-12, session 3):** Root-caused the "distant detail melds/smooths"
+complaint. THREE fixes: (1) **jitter sign inversion** — Gate-D A/B (user): jitterSign **(-,-)
+clearly sharpest**; (+,+) had DLSS un-jittering the wrong way = permanent per-frame blur.
+Default flipped in `DlssEvaluator` (this invalidates earlier preset-K/L/M rankings — re-sweep).
+(2) **PHASE_COUNT 16 → dynamic 8/scale² (32 at 0.5)** in `DlssJitter` per the DLSS guide.
+(3) **terrain mip-LOD bias** (new `DlssMipBias` + `VulkanGpuSamplerMixin`): renderpearl
+hardcodes `mipLodBias(0.0F)` in `VulkanGpuSampler`; the redirect substitutes `log2(scale)+extra`
+(-1 at 0.5) but ONLY while `LevelRendererMixin` arms it during `LevelRenderer.render` — the
+chunk-layer sampler (LevelRenderer L399, sole in-render createSampler in 26.3-snapshot-3) is
+the exact target; SamplerCache/mip-gen samplers stay unbiased. Live A/B via vanilla's own
+`LevelRenderState.shouldResetChunkLayerSampler` rebuild flag (set at render HEAD, post-extract).
+Knobs: **/dlssmc bias** + K-panel "Mip Bias" button (extra 0→-0.5→-1→-1.5→+1→+0.5); scale
+changes auto-request a sampler rebuild. Log line `terrain sampler created with mipLodBias=`
+confirms application (Gate C). AWAITING Gate B+C/D. Evidence trail: mip-0 A/B (user) sharpened
+distance but shimmered = classic info starvation; static non-convergence + "rounder with
+distance" = alpha-mip erosion on cutout foliage; near-grass MV overlay looked correct, so MVs
+were exonerated for this symptom. NEXT levers if insufficient: newer 310.x nvngx_dlss.dll swap,
+vanilla anisotropic filtering ON (options → texture filtering; feeds `maxAnisotropy` into the
+same chunk sampler), alpha-coverage-preserving mips, cutout layer in MV prepass.**
+
 **STATUS (2026-07-11, end of session 2): 🎉 M5 COMPLETE — DLSS-SR prototype DONE.
 P2-5 verified (noise gone, no ghosting, no pitch issues; mvecScale inversion was the
 root cause). P2-4 verified (camera-cut reset). The ONLY remaining pre-ship item is

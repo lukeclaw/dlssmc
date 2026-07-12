@@ -5,6 +5,7 @@ import com.jhp.client.dlss.DlssRenderState;
 import com.jhp.client.dlss.DlssResolution;
 import com.jhp.client.dlss.DlssBenchmark;
 import com.jhp.client.dlss.DlssEvaluator;
+import com.jhp.client.dlss.DlssMipBias;
 import com.jhp.client.dlss.DlssVelocity;
 import com.jhp.client.dlss.SlBridge;
 
@@ -123,6 +124,13 @@ public class DLSSmcClient implements ClientModInitializer {
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("jy").executes(ctx -> {
 							DlssEvaluator.jitterSignY = -DlssEvaluator.jitterSignY;
 							ctx.getSource().sendFeedback(Component.literal("[DLSSmc] " + DlssEvaluator.knobs()));
+							return 1;
+						}))
+						// MV-Q detail pass: cycle the extra terrain mip-LOD bias (auto part = log2(scale)).
+						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("bias").executes(ctx -> {
+							DlssMipBias.cycleExtra();
+							ctx.getSource().sendFeedback(Component.literal(
+									"[DLSSmc] " + DlssMipBias.status() + " (terrain sampler rebuilds next frame)"));
 							return 1;
 						}))
 						.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("bench").executes(ctx -> {
