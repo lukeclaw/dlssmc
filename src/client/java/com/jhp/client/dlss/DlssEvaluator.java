@@ -104,7 +104,7 @@ public final class DlssEvaluator {
      * presets K(11)/L(12) are far more motion-stable than the older per-mode defaults —
      * the main lever for the fast-vector noise/smear. sl_dlss.h DLSSPreset.
      */
-    public static volatile int presetOverride = 0;
+    public static volatile int presetOverride = 11; // K — best at 0.5 (Gate-D A/B); default was Preset M on Performance
 
     public static String presetName(int p) {
         return switch (p) {
