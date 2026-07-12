@@ -77,12 +77,12 @@ public final class DlssBenchmark {
             DlssEvaluator.presetOverride = 11;
             DlssEvaluator.modeOverride = 3;
         }),
-        new Step("DLSS on, scale 0.667, mode=UltraPerf", () -> {
+        new Step("DLSS on, scale 0.333, preset K", () -> {
             DlssEvaluator.enabled = true;
             DlssEvaluator.reset();
-            DlssResolution.scale = 0.667f;
+            DlssResolution.scale = 0.333f;
             DlssEvaluator.presetOverride = 11;
-            DlssEvaluator.modeOverride = 4;
+            DlssEvaluator.modeOverride = -1;
         }),
         new Step("DLSS on, scale 0.5, preset K", () -> {
             DlssEvaluator.enabled = true;
