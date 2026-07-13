@@ -1,9 +1,14 @@
 # DLSSmc
 
-**NVIDIA DLSS Super Resolution & Frame Generation for Minecraft Java Edition**
+**DLSS Super Resolution is LIVE. Frame Generation is in quality tuning. 84 commits, one dev (me), one AI agent (Claude), one research spike (DeepSeek).**
 
-A Fabric mod that integrates NVIDIA DLSS (Deep Learning Super Sampling) into Minecraft
-by hooking into Mojang's experimental Vulkan renderer (`renderpearl`) via SpongePowered Mixin.
+I'm **lukeclaw** — this is my research project to bring NVIDIA DLSS to Minecraft Java Edition.
+It works by piggybacking on Mojang's experimental Vulkan renderer (`renderpearl`) via SpongePowered
+Mixin, with NVIDIA's Streamline SDK loaded through Java 25 FFM (Panama) — no JNI.
+
+The goal is simple: make Minecraft run at high internal resolutions with AI upscaling instead of
+native rendering. Roughly 18 months ago this wasn't possible (Java Edition was OpenGL-only).
+Mojang's deobfuscation in 26.1 + Vulkan renderer in 26.2 changed that, and this mod is the result.
 
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0--1.0-blue.svg)](#license)
 [![Minecraft](https://img.shields.io/badge/minecraft-26.3--snapshot--3-green)](https://www.minecraft.net)
