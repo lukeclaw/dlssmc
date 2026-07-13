@@ -1,14 +1,10 @@
 # DLSSmc
 
-**DLSS Super Resolution is LIVE. Frame Generation is in quality tuning. 84 commits, one dev (me), one AI agent (Claude), one research spike (DeepSeek).**
+DLSSmc is my personal project to add [DLSS](https://www.nvidia.com/en-us/geforce/technologies/dlss/) to Minecraft. Mojang has been putting in some good work to make Vulkan rendering another native option for Java outside of the traditional OpenGL, which is good for us because separation of concerns between rendering and game logic has never been better. I've been working with the new Vulkan renderpearl renderer in 26.3 Snapshot 3 via SpongePowered Mixin, with NVIDIA's [Streamline](https://developer.nvidia.com/rtx/streamline) SDK loaded directly through Java 25 FFM (Panama).
 
-I'm **lukeclaw** — this is my research project to bring NVIDIA DLSS to Minecraft Java Edition.
-It works by piggybacking on Mojang's experimental Vulkan renderer (`renderpearl`) via SpongePowered
-Mixin, with NVIDIA's Streamline SDK loaded through Java 25 FFM (Panama) — no JNI.
+In my testing, the new Vulkan rendering is already at an awesome state, rendering 16+ chunks at 900+ FPS on a 4070 Super. Bad (and realistically expected) news is that NVIDIA's DLSS and the logic to piggyback it into Minecraft adds more per-frame latency than we benefit from in pure raster performance increase, notably dropping frames by 2x with DLSS turned on.
 
-The goal is simple: make Minecraft run at high internal resolutions with AI upscaling instead of
-native rendering. Roughly 18 months ago this wasn't possible (Java Edition was OpenGL-only).
-Mojang's deobfuscation in 26.1 + Vulkan renderer in 26.2 changed that, and this mod is the result.
+However! Hope is not lost. If you're running 900 FPS, what is the point of rendering 1.5x more? The goal is to help new shaders implementations (as well as raytracing) boost FPS. Historically, even with Sodium + Iris and various other optimization mods, Minecraft struggles hard with the beautiful shaders, extreme horizons, and insane texture packs that some folks like to run. For all you Vanilla lovers, this mod is probably not for you. But for you who love making the best game in the world also look the part, my goal is to help Minecraft run smoothly.
 
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0--1.0-blue.svg)](#license)
 [![Minecraft](https://img.shields.io/badge/minecraft-26.3--snapshot--3-green)](https://www.minecraft.net)
@@ -20,17 +16,38 @@ Mojang's deobfuscation in 26.1 + Vulkan renderer in 26.2 changed that, and this 
 
 ## Features
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| DLSS Super Resolution (SR) | ✅ **LIVE** | World renders at reduced internal res → DLSS upscales to native |
-| Sub-pixel jitter | ✅ **LIVE** | Halton(2,3) sequence for DLSS temporal feedback |
-| Resolution decoupling | ✅ **LIVE** | World at internal res, HUD/UI at native res |
-| Motion vectors | ✅ **LIVE** | Depth-aware fullscreen velocity pass + camera fallback |
-| Mip LOD bias | ✅ **LIVE** | Automatic terrain mip bias correction at reduced scales |
-| DLSS Frame Generation (FG) | 🔄 **Tuning** | DLSS-G enabled; quality pass in progress |
-| Reflex + PCL markers | ✅ **LIVE** | Latency measurement markers for FG |
-| In-game tuning panel | ✅ **LIVE** | Press **K** to open the DLSSmc tuning panel |
-| Benchmark suite | ✅ **LIVE** | `/dlssmc bench` for automated performance testing |
+| Feature | Status |
+|---------|--------|
+| DLSS Super Resolution | ✅ LIVE |
+| DLSS Frame Generation | 🔄 Tuning |
+| In-game tuning panel (K key) | ✅ LIVE |
+| Benchmark suite (`/dlssmc bench`) | ✅ LIVE |
+
+---
+
+## Gallery
+
+**Motion vector debug overlay** — depth-aware velocity pass visualized
+![MV overlay](src/client/resources/assets/dlssmc/screenshots/2026-07-10_19.30.41.png)
+
+**Motion vectors overlaid on gameplay**
+![MV on gameplay](src/client/resources/assets/dlssmc/screenshots/2026-07-10_20.01.30.png)
+
+**Smearing artifact during debugging**
+![Smearing](src/client/resources/assets/dlssmc/screenshots/2026-07-11_12.20.48.png)
+
+**Jitter sign comparison** — 200px center crops across 4 sign configurations
+| (−,−) | (−,+) | (+,−) | (+,+) |
+|:---:|:---:|:---:|:---:|
+| ![jitter--](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.42_crop.png) | ![jitter-+](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.46_crop.png) | ![jitter+-](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.52_crop.png) | ![jitter++](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.12.09_crop.png) |
+
+**Render scale comparison** — matching 300×200 crops (left, center, right) at 1.0, 0.667, and 0.5 scales
+
+| Scale | Left | Center | Right |
+|:---:|:---:|:---:|:---:|
+| **1.0** | ![1.0 left](src/client/resources/assets/dlssmc/screenshots/render_10_left.png) | ![1.0 center](src/client/resources/assets/dlssmc/screenshots/render_10_center.png) | ![1.0 right](src/client/resources/assets/dlssmc/screenshots/render_10_right.png) |
+| **0.667** | ![0.667 left](src/client/resources/assets/dlssmc/screenshots/render_0667_left.png) | ![0.667 center](src/client/resources/assets/dlssmc/screenshots/render_0667_center.png) | ![0.667 right](src/client/resources/assets/dlssmc/screenshots/render_0667_right.png) |
+| **0.5** | ![0.5 left](src/client/resources/assets/dlssmc/screenshots/render_05_left.png) | ![0.5 center](src/client/resources/assets/dlssmc/screenshots/render_05_center.png) | ![0.5 right](src/client/resources/assets/dlssmc/screenshots/render_05_right.png) |
 
 ---
 
