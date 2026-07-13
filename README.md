@@ -27,7 +27,20 @@ However! Hope is not lost. If you're running 900 FPS, what is the point of rende
 
 ## Gallery
 
-**Motion vector debug overlay** — depth-aware velocity pass visualized
+**Jitter sign comparison** — 200px center crops across 4 sign configurations
+| (−,−) | (−,+) | (+,−) | (+,+) |
+|:---:|:---:|:---:|:---:|
+| ![jitter--](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.42_crop.png) | ![jitter-+](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.46_crop.png) | ![jitter+-](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.52_crop.png) | ![jitter++](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.12.09_crop.png) |
+
+**Render scale comparison** — matching 300×200 crops at 1.0, 0.667, and 0.5
+
+| 1.0 | 0.667 | 0.5 |
+|:---:|:---:|:---:|
+| ![](src/client/resources/assets/dlssmc/screenshots/render_10_left.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_0667_left.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_05_left.png) |
+| ![](src/client/resources/assets/dlssmc/screenshots/render_10_center.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_0667_center.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_05_center.png) |
+| ![](src/client/resources/assets/dlssmc/screenshots/render_10_right.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_0667_right.png) | ![](src/client/resources/assets/dlssmc/screenshots/render_05_right.png) |
+
+**Motion vector debug overlay**
 ![MV overlay](src/client/resources/assets/dlssmc/screenshots/2026-07-10_19.30.41.png)
 
 **Motion vectors overlaid on gameplay**
@@ -35,19 +48,6 @@ However! Hope is not lost. If you're running 900 FPS, what is the point of rende
 
 **Smearing artifact during debugging**
 ![Smearing](src/client/resources/assets/dlssmc/screenshots/2026-07-11_12.20.48.png)
-
-**Jitter sign comparison** — 200px center crops across 4 sign configurations
-| (−,−) | (−,+) | (+,−) | (+,+) |
-|:---:|:---:|:---:|:---:|
-| ![jitter--](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.42_crop.png) | ![jitter-+](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.46_crop.png) | ![jitter+-](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.11.52_crop.png) | ![jitter++](src/client/resources/assets/dlssmc/screenshots/2026-07-12_02.12.09_crop.png) |
-
-**Render scale comparison** — matching 300×200 crops (left, center, right) at 1.0, 0.667, and 0.5 scales
-
-| Scale | Left | Center | Right |
-|:---:|:---:|:---:|:---:|
-| **1.0** | ![1.0 left](src/client/resources/assets/dlssmc/screenshots/render_10_left.png) | ![1.0 center](src/client/resources/assets/dlssmc/screenshots/render_10_center.png) | ![1.0 right](src/client/resources/assets/dlssmc/screenshots/render_10_right.png) |
-| **0.667** | ![0.667 left](src/client/resources/assets/dlssmc/screenshots/render_0667_left.png) | ![0.667 center](src/client/resources/assets/dlssmc/screenshots/render_0667_center.png) | ![0.667 right](src/client/resources/assets/dlssmc/screenshots/render_0667_right.png) |
-| **0.5** | ![0.5 left](src/client/resources/assets/dlssmc/screenshots/render_05_left.png) | ![0.5 center](src/client/resources/assets/dlssmc/screenshots/render_05_center.png) | ![0.5 right](src/client/resources/assets/dlssmc/screenshots/render_05_right.png) |
 
 ---
 
