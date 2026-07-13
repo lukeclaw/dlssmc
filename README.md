@@ -51,6 +51,34 @@ However! Hope is not lost. If you're running 900 FPS, what is the point of rende
 
 ---
 
+## Benchmark
+
+Latest run on RTX 4070 SUPER, driver 596.49, 2560×1369 output:
+
+```
+DLSSmc Benchmark 2026-07-12 01:37:08
+Scene: current camera view (stand still for consistent results)
+================================================================================
+Config                                              Avg FPS
+--------------------------------------------------------------------------------
+DLSS off, native 1.0                                  670.8
+DLSS off, scale 0.667                                 667.2
+DLSS on, scale 0.667, preset K (transformer)          475.7
+DLSS on, scale 0.667, preset default (CNN)            484.0
+DLSS on, scale 0.667, preset L                        262.0
+DLSS on, scale 0.667, mod=MaxPerformance              484.2
+DLSS on, scale 0.667, mode=Balanced                   435.6
+DLSS on, scale 0.667, mode=MaxQuality                 478.5
+DLSS on, scale 0.667, mode=UltraPerf                  648.3
+DLSS on, scale 0.5, preset K                          494.0
+DLSS on, scale 0.667, preset K, FG ON                 221.3
+DLSS on, scale 0.667, preset def, FG ON               220.4
+DLSS on, scale 0.667, preset K, FG off (cleanup)      472.4
+================================================================================
+```
+
+Run your own with `/dlssmc bench`.
+
 ## Requirements
 
 - **Minecraft:** Java Edition `26.3-snapshot-3` with the **Vulkan renderer** enabled
