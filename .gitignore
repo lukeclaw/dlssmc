@@ -1,61 +1,44 @@
-# gradle
-
+# --- Gradle ---
 .gradle/
 build/
 out/
 classes/
 
-# eclipse
-
-*.launch
-
-# idea
-
+# --- IDE ---
 .idea/
 *.iml
 *.ipr
 *.iws
-
-# vscode
-
+*.launch
 .settings/
 .vscode/
 bin/
 .classpath
 .project
 
-# macos
-
+# --- OS ---
 *.DS_Store
+Thumbs.db
 
-# fabric
-
+# --- Minecraft / Fabric ---
 run/
 
-# java
-
+# --- Java ---
 hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
 
-# sandbox scratch (mount blocks deletion)
-docs/_roundtrip_test.txt
-
-# git history export (regenerated each session)
+# --- Project scratch / temp ---
 dlssmc-history.bundle
-
-# Gate A verification dump (UTF-16 scratch)
+docs/_roundtrip_test.txt
 docs/javap_dump.txt
-
-# verification scratch (Gate B/C/D outputs)
 docs/build_out.txt
 docs/run_log.txt
 docs/*.png
-docs/javap_dump.txt
 
-# extracted vanilla shader sources (Mojang assets, reference only)
+# --- Extracted vanilla shaders (Mojang assets, reference only) ---
 /assets/
 
-# NVIDIA Streamline SDK (NVIDIA license — never commit)
+# --- NVIDIA Streamline SDK (proprietary — never commit) ---
 /streamline-sdk-*/
